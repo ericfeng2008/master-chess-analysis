@@ -1,6 +1,6 @@
 import type { PositionEvalResult } from '../types'
 
-const API_BASE = 'http://localhost:8080'
+const API_BASE = 'http://localhost:8099'
 
 type ApiErrorPayload = {
   detail?: string

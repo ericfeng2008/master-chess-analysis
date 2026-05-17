@@ -41,7 +41,7 @@ export function AnalyzerPage() {
 
   const [acceptableDrop, setAcceptableDrop] = useState(0.5);
   const [minefieldThreshold, setMinefieldThreshold] = useState(0.8);
-  const [engineDepth, setEngineDepth] = useState(20);
+  const [engineDepth, setEngineDepth] = useState(12);
   const [showConfig, setShowConfig] = useState(true);
 
   const [blunderThreshold, setBlunderThreshold] = useState(1.0);

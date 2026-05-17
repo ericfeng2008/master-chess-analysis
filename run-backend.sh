@@ -10,4 +10,4 @@ fi
 
 source "$BACKEND_DIR/.venv/bin/activate"
 cd "$BACKEND_DIR"
-exec uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+exec uvicorn app.main:app --reload --host 0.0.0.0 --port 8099

@@ -12,7 +12,7 @@ class AnalyzeRequest(BaseModel):
     pgn: str
     acceptable_drop: float = Field(default=0.5, ge=0.0)
     minefield_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
-    engine_depth: int = Field(default=20, ge=1, le=40)
+    engine_depth: int = Field(default=12, ge=10, le=20)
     blunder_threshold: float = Field(default=1.0, ge=0.5, le=3.0)
     mbi_trap_threshold: float = Field(default=0.40, ge=0.10, le=0.80)
     mbi_outlier_threshold: float = Field(default=0.05, ge=0.01, le=0.20)
@@ -53,7 +53,7 @@ class ErrorResponse(BaseModel):
 
 class EvaluatePositionRequest(BaseModel):
     fen: str
-    depth: int = Field(default=12, ge=1, le=30)
+    depth: int = Field(default=12, ge=10, le=20)
     acceptable_drop: float = Field(default=0.5, ge=0.0)
 
 

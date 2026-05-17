@@ -58,8 +58,8 @@ export function ConfigurationPanel({
               label="Stockfish Engine Depth"
               value={engineDepth}
               display={String(engineDepth)}
-              min={5}
-              max={30}
+              min={10}
+              max={20}
               step={1}
               onChange={setEngineDepth}
             />

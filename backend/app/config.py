@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     lc0_path: str = "/opt/homebrew/Cellar/lc0/0.32.1/bin/lc0"
     maia_weights_path: str = "./model/maia-2200.pb.gz"
     lc0_backend: str = "eigen"
-    default_engine_depth: int = 18
+    default_engine_depth: int = 12
     stockfish_threads: int = 0  # 0 = auto-detect (cpu_count - 1)
     stockfish_hash_mb: int = 256
     default_bait_threshold: float = 0.50
@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     default_acceptable_drop: float = 0.5
     default_minefield_threshold: float = 0.80
 
-    model_config = {"env_prefix": "MASTERPREP_"}
+    model_config = {"env_prefix": "ANALYSIS_"}
 
 
 settings = Settings()
