@@ -46,3 +46,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Agent doc
+agent.md 
+CLAUDE.md
