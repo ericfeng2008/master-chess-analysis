@@ -1,3 +1,5 @@
+import { ProgressBar } from "./ProgressBar";
+
 interface ConfigurationPanelProps {
   showConfig: boolean;
   setShowConfig: (v: boolean | ((prev: boolean) => boolean)) => void;
@@ -17,6 +19,14 @@ interface ConfigurationPanelProps {
   setEigThreshold: (v: number) => void;
   briThreshold: number;
   setBriThreshold: (v: number) => void;
+  isAnalyzing: boolean;
+  cancelAnalysis: () => void;
+  movesAnalyzed: number;
+  totalMoves: number;
+  minefieldsFound: number;
+  error: string | null;
+  handleAnalyze: () => void;
+  hasPgn: boolean;
 }
 
 export function ConfigurationPanel({
@@ -38,100 +48,145 @@ export function ConfigurationPanel({
   setEigThreshold,
   briThreshold,
   setBriThreshold,
+  isAnalyzing,
+  cancelAnalysis,
+  movesAnalyzed,
+  totalMoves,
+  minefieldsFound,
+  error,
+  handleAnalyze,
+  hasPgn,
 }: ConfigurationPanelProps) {
   return (
-    <div className="rounded-lg border border-gray-700 p-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-300">Analysis Configuration</h3>
+    <div className="panel panel-radius panel-pad">
+      <div className="panel-header">
+        <div>
+          <h3 className="section-title">Run Analysis</h3>
+          <p className="status-line mt-1">
+            {hasPgn ? "Ready" : "PGN required"} · Engine depth {engineDepth}
+            {!showConfig && " · Metric thresholds hidden"}
+          </p>
+        </div>
+      </div>
+
+      <div className="settings-summary">
+        <span>Analysis settings</span>
         <button
           onClick={() => setShowConfig((v) => !v)}
-          className="text-xs text-indigo-400 hover:text-indigo-300"
+          className="text-button"
         >
-          {showConfig ? "Hide settings" : "Show settings"}
+          {showConfig ? "Fold Settings" : "Tune Settings"}
         </button>
       </div>
 
       {showConfig && (
-        <div className="mt-2 flex items-start gap-4">
-          <div className="flex-1 space-y-2">
-            <Slider
-              label="Stockfish Engine Depth"
-              value={engineDepth}
-              display={String(engineDepth)}
-              min={10}
-              max={20}
-              step={1}
-              onChange={setEngineDepth}
-            />
-            <Slider
-              label="CTI: Acceptable Drop"
-              value={acceptableDrop}
-              display={acceptableDrop.toFixed(1)}
-              min={0.1}
-              max={2}
-              step={0.1}
-              onChange={setAcceptableDrop}
-            />
-            <Slider
-              label="CTI: Minefield Threshold"
-              value={minefieldThreshold}
-              display={minefieldThreshold.toFixed(2)}
-              min={0.5}
-              max={1}
-              step={0.05}
-              onChange={setMinefieldThreshold}
-            />
-            <Slider
-              label="MBI: Blunder Threshold"
-              value={blunderThreshold}
-              display={blunderThreshold.toFixed(1)}
-              min={0.5}
-              max={3}
-              step={0.1}
-              onChange={setBlunderThreshold}
-            />
-          </div>
-
-          <div className="flex-1 space-y-2">
-            <Slider
-              label="MBI: Trap Probability"
-              value={mbiTrapThreshold}
-              display={`${(mbiTrapThreshold * 100).toFixed(0)}%`}
-              min={0.1}
-              max={0.8}
-              step={0.05}
-              onChange={setMbiTrapThreshold}
-            />
-            <Slider
-              label="MBI: Outlier Probability"
-              value={mbiOutlierThreshold}
-              display={`${(mbiOutlierThreshold * 100).toFixed(0)}%`}
-              min={0.01}
-              max={0.2}
-              step={0.01}
-              onChange={setMbiOutlierThreshold}
-            />
-            <Slider
-              label="EIG: Gap Threshold"
-              value={eigThreshold}
-              display={eigThreshold.toFixed(1)}
-              min={0.5}
-              max={5}
-              step={0.1}
-              onChange={setEigThreshold}
-            />
-            <Slider
-              label="BRI: Brilliancy Threshold"
-              value={briThreshold}
-              display={`${(briThreshold * 100).toFixed(0)}%`}
-              min={0.01}
-              max={0.2}
-              step={0.01}
-              onChange={setBriThreshold}
-            />
-          </div>
+        <div className="settings-grid">
+          <Slider
+            label="Stockfish Engine Depth"
+            value={engineDepth}
+            display={String(engineDepth)}
+            min={10}
+            max={20}
+            step={1}
+            onChange={setEngineDepth}
+          />
+          <Slider
+            label="CTI: Acceptable Drop"
+            value={acceptableDrop}
+            display={acceptableDrop.toFixed(1)}
+            min={0.1}
+            max={2}
+            step={0.1}
+            onChange={setAcceptableDrop}
+          />
+          <Slider
+            label="CTI: Minefield Threshold"
+            value={minefieldThreshold}
+            display={minefieldThreshold.toFixed(2)}
+            min={0.5}
+            max={1}
+            step={0.05}
+            onChange={setMinefieldThreshold}
+          />
+          <Slider
+            label="MBI: Blunder Threshold"
+            value={blunderThreshold}
+            display={blunderThreshold.toFixed(1)}
+            min={0.5}
+            max={3}
+            step={0.1}
+            onChange={setBlunderThreshold}
+          />
+          <Slider
+            label="MBI: Trap Probability"
+            value={mbiTrapThreshold}
+            display={`${(mbiTrapThreshold * 100).toFixed(0)}%`}
+            min={0.1}
+            max={0.8}
+            step={0.05}
+            onChange={setMbiTrapThreshold}
+          />
+          <Slider
+            label="MBI: Outlier Probability"
+            value={mbiOutlierThreshold}
+            display={`${(mbiOutlierThreshold * 100).toFixed(0)}%`}
+            min={0.01}
+            max={0.2}
+            step={0.01}
+            onChange={setMbiOutlierThreshold}
+          />
+          <Slider
+            label="EIG: Gap Threshold"
+            value={eigThreshold}
+            display={eigThreshold.toFixed(1)}
+            min={0.5}
+            max={5}
+            step={0.1}
+            onChange={setEigThreshold}
+          />
+          <Slider
+            label="BRI: Brilliancy Threshold"
+            value={briThreshold}
+            display={`${(briThreshold * 100).toFixed(0)}%`}
+            min={0.01}
+            max={0.2}
+            step={0.01}
+            onChange={setBriThreshold}
+          />
         </div>
       )}
+
+      <div className="analysis-action">
+        <div className="flex items-center gap-3">
+          {isAnalyzing ? (
+            <>
+              <button
+                onClick={cancelAnalysis}
+                className="danger-button w-1/3 shrink-0"
+              >
+                Cancel
+              </button>
+              <div className="min-w-0 flex-1">
+                <ProgressBar
+                  positionsAnalyzed={movesAnalyzed}
+                  totalPositions={totalMoves}
+                  minefieldsFound={minefieldsFound}
+                />
+              </div>
+            </>
+          ) : (
+            <button
+              onClick={handleAnalyze}
+              disabled={!hasPgn}
+              className="primary-button w-full"
+            >
+              Analyze
+            </button>
+          )}
+        </div>
+
+        {error && <p className="status-line status-error mt-3">{error}</p>}
+      </div>
     </div>
   );
 }
@@ -155,9 +210,9 @@ function Slider({
 }) {
   return (
     <div>
-      <label className="-mb-0.5 flex justify-between text-sm text-gray-400">
+      <label className="settings-slider-label">
         <span>{label}</span>
-        <span>{display}</span>
+        <span className="mono muted">{display}</span>
       </label>
       <input
         type="range"

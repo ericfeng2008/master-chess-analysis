@@ -46,7 +46,7 @@ export function PgnViewer({
   const activeRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    activeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
   }, [activeMoveIndex, activeVariation, activeExploration]);
 
   if (!moves?.length) {
@@ -54,8 +54,8 @@ export function PgnViewer({
   }
 
   return (
-    <div className={className ?? "max-h-48 overflow-y-auto rounded-lg border border-gray-700 p-4"}>
-      <div className="flex flex-wrap gap-0.5 font-mono text-sm leading-relaxed">
+    <div className={className ?? "panel panel-radius panel-pad max-h-48 overflow-y-auto"}>
+      <div className="pgn-flow mono">
         {moves.map((move) => {
           const variation = variations?.[move.index] ?? null;
           const isActiveVar = activeVariation?.moveIndex === move.index;
@@ -67,8 +67,8 @@ export function PgnViewer({
           const showVariation = Boolean(variation && !variationMerged);
 
           return (
-            <span key={move.index} className="inline-flex flex-wrap items-center">
-              {move.side === "white" && <span className="mr-0.5 text-gray-500">{move.moveNumber}.</span>}
+            <span key={move.index} className="pgn-move-unit">
+              {move.side === "white" && <span className="move-number">{move.moveNumber}.</span>}
               <span
                 ref={
                   move.index === activeMoveIndex && !activeVariation && activeExploration == null
@@ -76,17 +76,14 @@ export function PgnViewer({
                     : undefined
                 }
                 onClick={() => onMoveClick(move.index)}
-                className={`cursor-pointer rounded px-1 py-0.5 ${
-                  move.index === activeMoveIndex && !activeVariation && activeExploration == null
-                    ? "bg-indigo-600 text-white"
-                    : "text-gray-200 hover:bg-gray-700"
-                }`}
+                className="pgn-move"
+                data-active={move.index === activeMoveIndex && !activeVariation && activeExploration == null}
               >
                 {move.san}
               </span>
 
               {showVariation && variation && (
-                <span className="ml-0.5 text-xs text-green-500">
+                <span className="variation-group">
                   (
                   {variation.line.map((san, vi) => {
                     const isFirst = vi === 0;
@@ -107,7 +104,7 @@ export function PgnViewer({
                     return (
                       <span key={vi}>
                         {showNumber && (
-                          <span className="mr-0.5 text-green-700">
+                          <span className="move-number">
                             {actualMoveNum}
                             {isFirst && varSide === "black" ? "..." : "."}
                           </span>
@@ -115,11 +112,8 @@ export function PgnViewer({
                         <span
                           ref={isActiveVar && activeVariation?.varIndex === vi ? activeRef : undefined}
                           onClick={() => onVariationClick?.(move.index, vi)}
-                          className={`cursor-pointer rounded px-0.5 font-semibold ${
-                            isActiveVar && activeVariation?.varIndex === vi
-                              ? "bg-green-700 text-green-100"
-                              : "text-green-400 hover:bg-gray-700"
-                          }`}
+                          className="variation-move"
+                          data-active={isActiveVar && activeVariation?.varIndex === vi}
                         >
                           {san}
                         </span>
@@ -201,7 +195,7 @@ function renderExplorationGroups(
     return (
       <span
         key={`exp-group-${group.map((g) => g.idx).join("_")}`}
-        className="ml-0.5 text-xs text-teal-500"
+        className="exploration-group"
       >
         (
         {group[0].ev.moves.slice(0, prefixLen).map((expMove, ei) => {
@@ -214,7 +208,7 @@ function renderExplorationGroups(
           return (
             <span key={ei}>
               {showNumber && (
-                <span className="mr-0.5 text-teal-700">
+                <span className="move-number">
                   {actualMoveNum}
                   {ei === 0 && expSide === "black" ? "..." : "."}
                 </span>
@@ -222,9 +216,8 @@ function renderExplorationGroups(
               <span
                 ref={isThisActive ? activeRef : undefined}
                 onClick={() => onExplorationClick?.(activeGroupItem?.idx ?? primaryExpIdx, ei)}
-                className={`cursor-pointer rounded px-0.5 ${
-                  isThisActive ? "bg-teal-700 text-teal-100" : "text-teal-400 hover:bg-gray-700"
-                }`}
+                className="exploration-move"
+                data-active={isThisActive}
               >
                 {expMove.san}
               </span>
@@ -253,7 +246,7 @@ function renderExplorationGroups(
                   return (
                     <span key={tmi}>
                       {showNumber && (
-                        <span className="mr-0.5 text-teal-700">
+                        <span className="move-number">
                           {actualMoveNum}
                           {tmi === 0 && expSide === "black" ? "..." : "."}
                         </span>
@@ -261,9 +254,8 @@ function renderExplorationGroups(
                       <span
                         ref={isThisActive ? activeRef : undefined}
                         onClick={() => onExplorationClick?.(tail.expIdx, globalMoveIdx)}
-                        className={`cursor-pointer rounded px-0.5 ${
-                          isThisActive ? "bg-teal-700 text-teal-100" : "text-teal-400 hover:bg-gray-700"
-                        }`}
+                        className="exploration-move"
+                        data-active={isThisActive}
                       >
                         {tailMove.san}
                       </span>
