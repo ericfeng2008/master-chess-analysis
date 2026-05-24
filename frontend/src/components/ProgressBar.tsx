@@ -9,15 +9,15 @@ export function ProgressBar({ positionsAnalyzed, totalPositions, minefieldsFound
 
   return (
     <div className="w-full">
-      <div className="-mb-1 flex justify-between text-sm text-gray-400">
+      <div className="mb-1 flex justify-between gap-3 text-xs muted">
         <span>
           {positionsAnalyzed}/{totalPositions} positions analyzed
         </span>
         <span>{minefieldsFound} minefields found</span>
       </div>
-      <div className="h-3 w-full rounded-full bg-gray-700">
+      <div className="h-2 w-full overflow-hidden rounded-full border border-[var(--border)] bg-[var(--bg-soft)]">
         <div
-          className="h-3 rounded-full bg-indigo-500 transition-all duration-300"
+          className="h-full rounded-full bg-[var(--accent)] transition-all duration-300"
           style={{ width: `${Math.min(pct, 100)}%` }}
         />
       </div>

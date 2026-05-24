@@ -22,13 +22,18 @@ export function AnalyzeControlsPanel({
   hasPgn,
 }: AnalyzeControlsPanelProps) {
   return (
-    <>
+    <div className="panel panel-radius panel-pad">
+      <div className="panel-header mb-3">
+        <h3 className="section-title">Run Analysis</h3>
+        {!isAnalyzing && <span className="status-line">{hasPgn ? "Ready" : "PGN required"}</span>}
+      </div>
+
       <div className="flex items-center gap-3">
         {isAnalyzing ? (
           <>
             <button
               onClick={cancelAnalysis}
-              className="w-1/2 shrink-0 rounded bg-red-600 px-4 py-2 text-white hover:bg-red-500"
+              className="danger-button w-1/3 shrink-0"
             >
               Cancel
             </button>
@@ -44,14 +49,14 @@ export function AnalyzeControlsPanel({
           <button
             onClick={handleAnalyze}
             disabled={!hasPgn}
-            className="w-1/2 rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="primary-button w-full"
           >
             Analyze
           </button>
         )}
       </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-    </>
+      {error && <p className="status-line status-error mt-3">{error}</p>}
+    </div>
   );
 }

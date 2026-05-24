@@ -1,6 +1,6 @@
 import type { PositionEvalResult } from '../types'
 
-const API_BASE = 'http://localhost:8099'
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 type ApiErrorPayload = {
   detail?: string

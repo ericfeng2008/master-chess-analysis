@@ -70,26 +70,26 @@ export function GameInfoPanel({ headers, showGameInfo, setShowGameInfo }: GameIn
 
   return (
     <div ref={panelRef} className="shrink-0">
-      <div className="mb-1 flex items-center justify-between">
-        <h3 className="truncate text-sm font-medium text-gray-400">
+      <div className="panel-header mb-2">
+        <h3 className="section-title truncate">
           {title}
-          {result && <span className="-ml-1 text-gray-500"> ({result})</span>}
+          {result && <span className="muted"> ({result})</span>}
         </h3>
         <button
           onClick={() => setShowGameInfo(!showGameInfo)}
-          className="ml-2 shrink-0 text-xs text-indigo-400 hover:text-indigo-300"
+          className="text-button shrink-0"
         >
-          {showGameInfo ? "Hide game info" : "Show game info"}
+          {showGameInfo ? "Fold" : "Game Info"}
         </button>
       </div>
 
       {showGameInfo && (
-        <div className="rounded-lg border border-gray-700 p-3">
+        <div className="game-info-detail">
           <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
             {TAG_DISPLAY_ORDER.filter(({ key }) => headers[key]).map(({ key, label }) => (
               <div key={key} className="contents">
-                <span className="text-gray-500">{label}:</span>
-                <span className="text-gray-300">{headers[key]}</span>
+                <span className="metric-label">{label}:</span>
+                <span className="info-value">{headers[key]}</span>
               </div>
             ))}
           </div>

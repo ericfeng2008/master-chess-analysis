@@ -50,3 +50,9 @@ Thumbs.db
 # Agent doc
 agent.md 
 CLAUDE.md
+.claude/
+openspec/
+
+
+# exclude big Maia2 model files
+backend/maia2_models/

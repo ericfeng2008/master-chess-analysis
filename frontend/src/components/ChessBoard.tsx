@@ -26,7 +26,7 @@ export function ChessBoard({
   const v5Arrows = arrows.map(([from, to, color]) => ({
     startSquare: from,
     endSquare: to,
-    color: color ?? '#f59e0b',
+    color: color ?? "var(--accent)",
   }));
   const sideToMove = fen?.split(" ")[1] === "b" ? "b" : "w";
 
@@ -46,11 +46,13 @@ export function ChessBoard({
 
   const highlightStyles: Record<string, CSSProperties> = {};
   if (selectedSquare) {
-    highlightStyles[selectedSquare] = { backgroundColor: "rgba(20, 184, 166, 0.4)" };
+    highlightStyles[selectedSquare] = {
+      backgroundColor: "color-mix(in srgb, var(--accent), transparent 62%)",
+    };
   }
   for (const sq of legalTargets) {
     highlightStyles[sq] = {
-      background: "radial-gradient(circle, rgba(20, 184, 166, 0.35) 25%, transparent 25%)",
+      background: "radial-gradient(circle, color-mix(in srgb, var(--teal), transparent 55%) 24%, transparent 26%)",
       borderRadius: "50%",
     };
   }
@@ -94,7 +96,7 @@ export function ChessBoard({
   };
 
   return (
-    <div className="w-full max-w-[640px]">
+    <div className="w-full">
       <Chessboard
         options={{
           position: fen ?? STARTING_FEN,

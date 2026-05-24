@@ -67,21 +67,21 @@ export function PositionInfoPanel({
   }
 
   return (
-    <div className="shrink-0 rounded-lg border border-gray-700 p-3">
-      <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-400">Position Info</h3>
+    <div className="panel panel-radius panel-pad shrink-0">
+      <div className="panel-header mb-3">
+        <h3 className="section-title">Position Info</h3>
         {exploration.isExploring && (
           <div className="flex items-center gap-1">
             <button
               onClick={exploration.exitExploration}
-              className="text-xs text-teal-400 hover:text-teal-300"
+              className="text-button"
             >
               Exit
             </button>
           </div>
         )}
         {!exploration.isExploring && variationState && (
-          <span className="rounded bg-green-800 px-2 py-0.5 text-xs font-medium text-green-200">
+          <span className="rounded border border-[var(--variation-pill-border)] bg-[var(--variation-active-bg)] px-2 py-0.5 text-xs font-medium text-[var(--variation-active-text)]">
             Variation
           </span>
         )}
@@ -113,7 +113,7 @@ function fenToMovePrefix(fen: string) {
 }
 
 function EvalDisplay({ ev }: { ev: PositionEvalResult }) {
-  return <span className="text-blue-400">{ev.mate_in !== null ? `#${ev.mate_in}` : ev.eval.toFixed(2)}</span>;
+  return <span className="text-[var(--insight)]">{ev.mate_in !== null ? `#${ev.mate_in}` : ev.eval.toFixed(2)}</span>;
 }
 
 function GoodMoves({ ev }: { ev: PositionEvalResult }) {
@@ -124,8 +124,8 @@ function GoodMoves({ ev }: { ev: PositionEvalResult }) {
 
   return (
     <div className="col-span-2">
-      <span className="text-gray-500">Good moves: </span>
-      <span className="font-mono">
+      <span className="metric-label">Good moves: </span>
+      <span className="mono">
         {others
           .map((m) => {
             const d = ev.good_moves_with_eval[m];
@@ -143,30 +143,30 @@ function ExplorationInfo({ exploration }: { exploration: PositionInfoPanelProps[
 
   if (!ev) {
     if (exploration.isEvaluating) {
-      return <div className="animate-pulse text-sm text-teal-400">Evaluating...</div>;
+      return <div className="animate-pulse text-sm text-[var(--teal)]">Evaluating...</div>;
     }
-    return <div className="text-sm text-gray-500">No evaluation data</div>;
+    return <div className="text-sm muted">No evaluation data</div>;
   }
 
   const { prefix } = fenToMovePrefix(expMove.fen);
 
   return (
-    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-sm">
+    <div className="compact-grid text-sm">
       <div>
-        <span className="text-gray-500">Move:</span> <span className="font-mono text-teal-300">{prefix} {expMove.san}</span>
+        <span className="metric-label">Move:</span> <span className="mono text-[var(--teal-soft)]">{prefix} {expMove.san}</span>
       </div>
       <div>
-        <span className="text-gray-500">Eval:</span> <EvalDisplay ev={ev} />
+        <span className="metric-label">Eval:</span> <EvalDisplay ev={ev} />
       </div>
       {ev.best_move && (
         <div className="col-span-2">
-          <span className="text-gray-500">Best move:</span> <span className="font-mono">{prefix} {ev.best_move}</span>
+          <span className="metric-label">Best move:</span> <span className="mono">{prefix} {ev.best_move}</span>
         </div>
       )}
       <GoodMoves ev={ev} />
       {ev.cti != null && (
         <div className="col-span-2">
-          <span className="text-gray-500">CTI:</span> <span className="text-teal-400">{ev.cti.toFixed(4)}</span>
+          <span className="metric-label">CTI:</span> <span className="text-[var(--teal)]">{ev.cti.toFixed(4)}</span>
         </div>
       )}
     </div>
@@ -201,26 +201,26 @@ function VariationInfo({
 
   if (!ev) {
     if (varEvalLoading === fenAfter) {
-      return <div className="animate-pulse text-sm text-green-400">Evaluating...</div>;
+      return <div className="animate-pulse text-sm text-[var(--success)]">Evaluating...</div>;
     }
     return (
-      <div className="text-sm text-gray-500">
-        <span className="text-gray-500">Move:</span> <span className="font-mono text-green-300">{prefix} {san}</span>
+      <div className="text-sm muted">
+        <span className="metric-label">Move:</span> <span className="mono text-[var(--variation-active-text)]">{prefix} {san}</span>
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-sm">
+    <div className="compact-grid text-sm">
       <div>
-        <span className="text-gray-500">Move:</span> <span className="font-mono text-green-300">{prefix} {san}</span>
+        <span className="metric-label">Move:</span> <span className="mono text-[var(--variation-active-text)]">{prefix} {san}</span>
       </div>
       <div>
-        <span className="text-gray-500">Eval:</span> <EvalDisplay ev={ev} />
+        <span className="metric-label">Eval:</span> <EvalDisplay ev={ev} />
       </div>
       {ev.best_move && (
         <div className="col-span-2">
-          <span className="text-gray-500">Best move:</span> <span className="font-mono">{prefix} {ev.best_move}</span>
+          <span className="metric-label">Best move:</span> <span className="mono">{prefix} {ev.best_move}</span>
         </div>
       )}
       <GoodMoves ev={ev} />
@@ -233,40 +233,40 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
   const goodOthers = s.good_moves.filter((m) => m !== s.best_move);
 
   return (
-    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-sm">
+    <div className="compact-grid text-sm">
       <div>
-        <span className="text-gray-500">Move:</span> <span className="font-mono">{mPrefix} {s.move}</span>
+        <span className="metric-label">Move:</span> <span className="mono">{mPrefix} {s.move}</span>
       </div>
       <div>
-        <span className="text-gray-500">Side:</span> {s.side}
+        <span className="metric-label">Side:</span> <span className="info-value">{s.side}</span>
       </div>
       <div>
-        <span className="text-gray-500">Eval:</span>{" "}
-        <span className="text-blue-400">{s.mate_in !== null ? `#${s.mate_in}` : s.eval_after.toFixed(2)}</span>
+        <span className="metric-label">Eval:</span>{" "}
+        <span className="text-[var(--insight)]">{s.mate_in !== null ? `#${s.mate_in}` : s.eval_after.toFixed(2)}</span>
       </div>
       <div>
-        <span className="text-gray-500">CTI:</span>{" "}
-        <span style={{ color: s.side === "white" ? "#22c55e" : "#f97316" }}>
+        <span className="metric-label">CTI:</span>{" "}
+        <span style={{ color: s.side === "white" ? "var(--success)" : "var(--warning)" }}>
           {s.cti !== null ? s.cti.toFixed(4) : "N/A"}
         </span>
       </div>
       <div>
-        <span className="text-gray-500">Minefield:</span>{" "}
+        <span className="metric-label">Minefield:</span>{" "}
         {s.is_minefield ? (
-          <span className="font-semibold text-amber-400">Yes</span>
+          <span className="font-semibold text-[var(--warning)]">Yes</span>
         ) : (
-          <span className="text-gray-400">No</span>
+          <span className="muted">No</span>
         )}
       </div>
       {s.best_move && (
         <div className="col-span-2">
-          <span className="text-gray-500">Best move:</span> <span className="font-mono">{s.best_move}</span>
+          <span className="metric-label">Best move:</span> <span className="mono">{s.best_move}</span>
         </div>
       )}
       {s.best_move && goodOthers.length > 0 && (
         <div className="col-span-2">
-          <span className="text-gray-500">Good moves:</span>{" "}
-          <span className="font-mono">
+          <span className="metric-label">Good moves:</span>{" "}
+          <span className="mono">
             {goodOthers
               .map((m) => {
                 const d = s.good_moves_with_eval[m];
@@ -278,14 +278,14 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
       )}
       {s.mbi_classification && (
         <div className="col-span-2">
-          <span className="text-gray-500">MBI:</span>{" "}
+          <span className="metric-label">MBI:</span>{" "}
           <span
             className={
               s.mbi_classification === "cognitive_trap"
-                ? "font-semibold text-fuchsia-400"
+                ? "font-semibold text-[var(--violet)]"
                 : s.mbi_classification === "random_oversight"
-                  ? "font-semibold text-red-400"
-                  : "text-gray-300"
+                  ? "font-semibold text-[var(--danger)]"
+                  : "info-value"
             }
           >
             {s.mbi_classification === "cognitive_trap"
@@ -295,32 +295,32 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
                 : "Unclassified Blunder"}
           </span>
           {s.mbi_maia_prob !== null && (
-            <span className="ml-1 text-gray-500">(Maia: {(s.mbi_maia_prob * 100).toFixed(1)}%)</span>
+            <span className="ml-1 muted">(Maia: {(s.mbi_maia_prob * 100).toFixed(1)}%)</span>
           )}
         </div>
       )}
       {s.eig_value !== null && (
         <div className="col-span-2">
-          <span className="text-gray-500">EIG:</span>{" "}
-          <span className={s.is_eig_flagged ? "font-semibold text-cyan-400" : "text-gray-300"}>
+          <span className="metric-label">EIG:</span>{" "}
+          <span className={s.is_eig_flagged ? "font-semibold text-[var(--insight)]" : "info-value"}>
             {s.eig_value.toFixed(2)}
           </span>
-          {s.is_eig_flagged && <span className="ml-1 text-cyan-400">Flagged</span>}
+          {s.is_eig_flagged && <span className="ml-1 text-[var(--insight)]">Flagged</span>}
         </div>
       )}
       {s.is_brilliant && (
         <div className="col-span-2">
-          <span className="text-gray-500">BRI:</span>{" "}
-          <span className="font-semibold text-yellow-400">Brilliant</span>
+          <span className="metric-label">BRI:</span>{" "}
+          <span className="font-semibold text-[var(--accent-strong)]">Brilliant</span>
           {s.bri_maia_prob !== null && (
-            <span className="ml-1 text-gray-500">(Maia: {(s.bri_maia_prob * 100).toFixed(1)}%)</span>
+            <span className="ml-1 muted">(Maia: {(s.bri_maia_prob * 100).toFixed(1)}%)</span>
           )}
         </div>
       )}
       {s.epe_score !== null && (
         <div className="col-span-2">
-          <span className="text-gray-500">EPE:</span>{" "}
-          <span className="text-purple-400">{s.epe_score.toFixed(2)}</span>
+          <span className="metric-label">EPE:</span>{" "}
+          <span className="text-[var(--violet)]">{s.epe_score.toFixed(2)}</span>
         </div>
       )}
     </div>

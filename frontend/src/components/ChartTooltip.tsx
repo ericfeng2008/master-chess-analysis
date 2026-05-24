@@ -33,17 +33,17 @@ export function CustomTooltip({
   const ctiValue = d.side === "white" ? d.ctiWhite : d.ctiBlack;
 
   return (
-    <div className="rounded border border-gray-600 bg-gray-800 p-2 text-sm shadow-lg">
-      <p className="text-gray-300">
-        Move {d.move_number} ({d.side}): <span className="font-mono">{d.move}</span>
+    <div className="tooltip-panel">
+      <p>
+        Move {d.move_number} ({d.side}): <span className="mono">{d.move}</span>
       </p>
-      <p className="text-blue-400">Eval: {d.mate_in !== null ? `#${d.mate_in}` : d.raw_eval.toFixed(2)}</p>
-      <p style={{ color: d.side === "white" ? "#22c55e" : "#f97316" }}>
+      <p className="text-[var(--insight)]">Eval: {d.mate_in !== null ? `#${d.mate_in}` : d.raw_eval.toFixed(2)}</p>
+      <p style={{ color: d.side === "white" ? "var(--success)" : "var(--warning)" }}>
         CTI: {ctiValue !== null ? ctiValue.toFixed(4) : "N/A"}
       </p>
-      {d.epe !== null && <p className="text-purple-400">EPE: {d.epe.toFixed(2)}</p>}
+      {d.epe !== null && <p className="text-[var(--violet)]">EPE: {d.epe.toFixed(2)}</p>}
       {d.mbi_classification !== null && (
-        <p className="text-fuchsia-400">
+        <p className="text-[var(--violet)]">
           MBI: {d.mbi_classification === "cognitive_trap"
             ? "Cognitive Trap"
             : d.mbi_classification === "random_oversight"
@@ -53,7 +53,7 @@ export function CustomTooltip({
         </p>
       )}
       {d.eig_value !== null && (
-        <p className="text-cyan-400">
+        <p className="text-[var(--insight)]">
           EIG: {d.eig_value.toFixed(2)}{d.is_eig_flagged ? " Flagged" : ""}
         </p>
       )}

@@ -45,6 +45,28 @@ interface AnalysisChartProps {
   perspective: "white" | "black";
 }
 
+const CHART = {
+  axis: "var(--chart-axis)",
+  evalBg: "var(--chart-eval-bg)",
+  evalPositive: "var(--chart-eval-positive)",
+  evalNegative: "var(--chart-eval-negative)",
+  zero: "var(--chart-zero)",
+  selected: "var(--chart-selected)",
+  ctiWhite: "var(--chart-cti-white)",
+  ctiBlack: "var(--chart-cti-black)",
+  epe: "var(--chart-epe)",
+  mineBest: "var(--chart-mine-best)",
+  mineBestStroke: "var(--chart-mine-best-stroke)",
+  mineGood: "var(--chart-mine-good)",
+  mineGoodStroke: "var(--chart-mine-good-stroke)",
+  mineMissed: "var(--chart-mine-missed)",
+  mineMissedStroke: "var(--chart-mine-missed-stroke)",
+  trap: "var(--chart-trap)",
+  trapStroke: "var(--chart-trap-stroke)",
+  intuition: "var(--chart-intuition)",
+  intuitionStroke: "var(--chart-intuition-stroke)",
+};
+
 export function AnalysisChart({
   moves,
   minefields,
@@ -93,9 +115,9 @@ export function AnalysisChart({
   evalTicks.sort((a, b) => a - b);
 
   return (
-    <div className="flex items-stretch" style={{ marginLeft: -62, marginRight: -62 }}>
+    <div className="flex items-stretch">
       <div className="flex w-8 shrink-0 items-center justify-center">
-        <span className="-rotate-90 select-none whitespace-nowrap text-xs tracking-wide text-gray-400">
+        <span className="-rotate-90 select-none whitespace-nowrap text-xs tracking-wide muted">
           Eval (pawns)
         </span>
       </div>
@@ -111,7 +133,7 @@ export function AnalysisChart({
               }
             }}
           >
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#9ca3af" }} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: CHART.axis }} />
 
             <YAxis
               yAxisId="eval"
@@ -128,7 +150,7 @@ export function AnalysisChart({
                 }
                 const realVal = Math.round(evalInverseTransform(payload.value));
                 return (
-                  <text x={x} y={y} dy={4} textAnchor="end" fill="#9ca3af" fontSize={11}>
+                  <text x={x} y={y} dy={4} textAnchor="end" fill={CHART.axis} fontSize={11}>
                     {realVal}
                   </text>
                 );
@@ -149,7 +171,7 @@ export function AnalysisChart({
                   return <g />;
                 }
                 return (
-                  <text x={x} y={y} dy={4} textAnchor="start" fill="#9ca3af" fontSize={11}>
+                  <text x={x} y={y} dy={4} textAnchor="start" fill={CHART.axis} fontSize={11}>
                     {payload.value.toFixed(1)}
                   </text>
                 );
@@ -160,7 +182,7 @@ export function AnalysisChart({
               yAxisId="eval"
               y1={evalDomain[0]}
               y2={evalDomain[1]}
-              fill="#4a4a4a"
+              fill={CHART.evalBg}
               fillOpacity={1}
               stroke="none"
             />
@@ -168,7 +190,7 @@ export function AnalysisChart({
               yAxisId="eval"
               type="monotone"
               dataKey="evalPositive"
-              fill="#d4d4d4"
+              fill={CHART.evalPositive}
               stroke="none"
               baseValue={0}
               isAnimationActive={false}
@@ -177,18 +199,18 @@ export function AnalysisChart({
               yAxisId="eval"
               type="monotone"
               dataKey="evalNegative"
-              fill="#1a1a1a"
+              fill={CHART.evalNegative}
               stroke="none"
               baseValue={0}
               isAnimationActive={false}
             />
-            <ReferenceLine yAxisId="eval" y={0} stroke="#9ca3af" strokeWidth={1} />
+            <ReferenceLine yAxisId="eval" y={0} stroke={CHART.zero} strokeWidth={1} />
 
             <Line
               yAxisId="eval"
               type="monotone"
               dataKey="epe"
-              stroke="#a78bfa"
+              stroke={CHART.epe}
               strokeDasharray="2 3"
               strokeWidth={1.5}
               dot={false}
@@ -203,7 +225,7 @@ export function AnalysisChart({
                 yAxisId="cti"
                 type="monotone"
                 dataKey="ctiWhite"
-                stroke="#22c55e"
+                stroke={CHART.ctiWhite}
                 name="CTI (White)"
                 dot={false}
                 strokeWidth={1}
@@ -225,7 +247,7 @@ export function AnalysisChart({
                 yAxisId="cti"
                 type="monotone"
                 dataKey="ctiBlack"
-                stroke="#f97316"
+                stroke={CHART.ctiBlack}
                 name="CTI (Black)"
                 dot={false}
                 strokeWidth={1}
@@ -248,14 +270,14 @@ export function AnalysisChart({
               if (!m || !d || m.side !== perspective) {
                 return null;
               }
-              let fill = "#ef4444";
-              let stroke = "#dc2626";
+              let fill = CHART.mineMissed;
+              let stroke = CHART.mineMissedStroke;
               if (m.move === m.best_move) {
-                fill = "#22c55e";
-                stroke = "#16a34a";
+                fill = CHART.mineBest;
+                stroke = CHART.mineBestStroke;
               } else if (m.good_moves.includes(m.move)) {
-                fill = "#f59e0b";
-                stroke = "#d97706";
+                fill = CHART.mineGood;
+                stroke = CHART.mineGoodStroke;
               }
               const yValue = d.side === "white" ? d.ctiWhite : d.ctiBlack;
               return (
@@ -292,7 +314,7 @@ export function AnalysisChart({
                     fill="none"
                     stroke="none"
                     shape={({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) => (
-                      <DiamondShape cx={cx} cy={cy} fill="#e879f9" stroke="#c026d3" />
+                      <DiamondShape cx={cx} cy={cy} fill={CHART.trap} stroke={CHART.trapStroke} />
                     )}
                   />
                 );
@@ -309,7 +331,7 @@ export function AnalysisChart({
                     fill="none"
                     stroke="none"
                     shape={({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) => (
-                      <XMarkShape cx={cx} cy={cy} stroke="#ef4444" />
+                      <XMarkShape cx={cx} cy={cy} stroke={CHART.mineMissed} />
                     )}
                   />
                 );
@@ -325,7 +347,7 @@ export function AnalysisChart({
                   fill="none"
                   stroke="none"
                   shape={({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) => (
-                    <DiamondShape cx={cx} cy={cy} fill="none" stroke="#f472b6" />
+                    <DiamondShape cx={cx} cy={cy} fill="none" stroke={CHART.trap} />
                   )}
                 />
               );
@@ -350,7 +372,7 @@ export function AnalysisChart({
                   fill="none"
                   stroke="none"
                   shape={({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) => (
-                    <SquareShape cx={cx} cy={cy} fill="#22d3ee" stroke="#06b6d4" />
+                    <SquareShape cx={cx} cy={cy} fill={CHART.intuition} stroke={CHART.intuitionStroke} />
                   )}
                 />
               );
@@ -376,7 +398,7 @@ export function AnalysisChart({
                   fill="none"
                   stroke="none"
                   shape={({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) => (
-                    <StarShape cx={cx} cy={cy} fill="#fbbf24" stroke="#d97706" />
+                    <StarShape cx={cx} cy={cy} fill="var(--accent-strong)" stroke="var(--accent)" />
                   )}
                 />
               );
@@ -393,7 +415,7 @@ export function AnalysisChart({
                   yAxisId={isCtiSide ? "cti" : "eval"}
                   r={8}
                   fill="none"
-                  stroke="#ffffff"
+                  stroke={CHART.selected}
                   strokeWidth={2}
                 />
               );
@@ -403,7 +425,7 @@ export function AnalysisChart({
       </div>
 
       <div className="flex w-8 shrink-0 items-center justify-center">
-        <span className="select-none whitespace-nowrap rotate-90 text-xs tracking-wide text-gray-400">CTI</span>
+        <span className="select-none whitespace-nowrap rotate-90 text-xs tracking-wide muted">CTI</span>
       </div>
     </div>
   );
