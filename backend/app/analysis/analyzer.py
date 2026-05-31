@@ -26,6 +26,7 @@ from app.analysis.data_models import (
     SKIP_EVAL_THRESHOLD,
 )
 from app.analysis.metrics import compute_cti, compute_epe, populate_eval_after
+from app.pgn_utils import normalize_pgn_for_python_chess
 
 
 def analyze_game(
@@ -76,7 +77,7 @@ def analyze_game(
     """
     import io
 
-    pgn_io = io.StringIO(pgn_text)
+    pgn_io = io.StringIO(normalize_pgn_for_python_chess(pgn_text))
     game = chess.pgn.read_game(pgn_io)
     if game is None:
         yield AnalysisCompleteEvent(moves=[], minefields=[])

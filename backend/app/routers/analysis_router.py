@@ -12,6 +12,7 @@ from app.analysis.data_models import AnalysisCompleteEvent, AnalysisProgressEven
 from app.engines.maia_client import MaiaClient
 from app.engines.stockfish_client import StockfishClient
 from app.models.schemas import AnalyzeRequest, EvaluatePositionRequest, EvaluatePositionResponse, PgnUploadResponse
+from app.pgn_utils import normalize_pgn_for_python_chess
 
 router = APIRouter()
 
@@ -51,6 +52,7 @@ async def upload_pgn(file: UploadFile):
             status_code=400, detail="File is not valid text (expected UTF-8 PGN)"
         )
 
+    pgn_text = normalize_pgn_for_python_chess(pgn_text)
     pgn_io = io.StringIO(pgn_text)
     num_games = 0
     total_variations = 0
