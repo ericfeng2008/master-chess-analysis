@@ -1,11 +1,18 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+MAIA3_MODEL = "maia3-79m"
+MAIA3_CHECKPOINT_PATH = str(BACKEND_DIR / "model" / "maia3-79m.pt")
+MAIA3_DEVICE = "cpu"
+MAIA3_USE_HISTORY = True
+DEFAULT_MAIA3_ELO = 2200
 
 
 class Settings(BaseSettings):
     stockfish_path: str = "/opt/homebrew/bin/stockfish"
-    lc0_path: str = "/opt/homebrew/Cellar/lc0/0.32.1/bin/lc0"
-    maia_weights_path: str = "./model/maia-2200.pb.gz"
-    lc0_backend: str = "eigen"
     default_engine_depth: int = 12
     stockfish_threads: int = 0  # 0 = auto-detect (cpu_count - 1)
     stockfish_hash_mb: int = 256

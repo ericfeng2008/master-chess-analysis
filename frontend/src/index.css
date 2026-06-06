@@ -531,6 +531,40 @@ button:disabled {
   white-space: nowrap;
 }
 
+.settings-select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 650;
+  padding: 0 10px;
+}
+
+.game-info-elo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.game-info-elo-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.game-info-elo-select {
+  min-height: 32px;
+  font-size: 0.82rem;
+}
+
 .intro-panel {
   position: relative;
   display: flex;

@@ -12,8 +12,10 @@ Provides the core computation routines used by the analysis pipeline:
 """
 
 import chess
+from collections.abc import Sequence
 
-from app.engines.maia_client import MaiaClient
+from app.config import DEFAULT_MAIA3_ELO
+from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 from app.analysis.data_models import (
     AnalysisMoveData,
@@ -25,23 +27,61 @@ from app.analysis.data_models import (
 )
 
 
-MaiaPolicyCache = dict[str, dict[chess.Move, float]]
+MaiaPolicyCacheKey = tuple[str, bool, int, int, str, tuple[str, ...]]
+MaiaPolicyCache = dict[MaiaPolicyCacheKey, dict[chess.Move, float]]
+
+
+def _maia_elos_for_position(
+    board: chess.Board,
+    white_elo: int,
+    black_elo: int,
+) -> tuple[int, int]:
+    """Return Maia3 self/opponent Elo values for the current side to move."""
+    if board.turn == chess.WHITE:
+        return int(white_elo), int(black_elo)
+    return int(black_elo), int(white_elo)
 
 
 def _predict_maia(
     board: chess.Board,
-    maia: MaiaClient,
+    maia: Maia3Client,
     cache: MaiaPolicyCache | None = None,
+    maia3_white_elo: int = DEFAULT_MAIA3_ELO,
+    maia3_black_elo: int = DEFAULT_MAIA3_ELO,
+    history_fens: Sequence[str] | None = None,
 ) -> dict[chess.Move, float]:
     """Return Maia policy, reusing per-analysis predictions when provided."""
+    self_elo, opponent_elo = _maia_elos_for_position(
+        board,
+        maia3_white_elo,
+        maia3_black_elo,
+    )
     if cache is None:
-        return maia.predict(board)
+        return maia.predict(
+            board,
+            self_elo=self_elo,
+            opponent_elo=opponent_elo,
+            history_fens=history_fens,
+        )
 
-    fen = board.fen()
-    policy = cache.get(fen)
+    history_key = tuple(history_fens) if history_fens is not None else (board.fen(),)
+    key: MaiaPolicyCacheKey = (
+        maia.model_name,
+        maia.use_history,
+        self_elo,
+        opponent_elo,
+        board.fen(),
+        history_key,
+    )
+    policy = cache.get(key)
     if policy is None:
-        policy = maia.predict(board)
-        cache[fen] = policy
+        policy = maia.predict(
+            board,
+            self_elo=self_elo,
+            opponent_elo=opponent_elo,
+            history_fens=history_fens,
+        )
+        cache[key] = policy
     return policy
 
 
@@ -78,8 +118,11 @@ def _select_depth(eval_estimate: float, full_depth: int) -> int:
 def compute_epe(
     board_after_move: chess.Board,
     stockfish: StockfishClient,
-    maia: MaiaClient,
+    maia: Maia3Client,
     maia_policy_cache: MaiaPolicyCache | None = None,
+    maia3_white_elo: int = DEFAULT_MAIA3_ELO,
+    maia3_black_elo: int = DEFAULT_MAIA3_ELO,
+    history_fens: Sequence[str] | None = None,
 ) -> float | None:
     """Compute the Expected Practical Evaluation for a position.
 
@@ -121,7 +164,14 @@ def compute_epe(
         return None
 
     # Get Maia's prediction of what a human would play here
-    policy = _predict_maia(board_after_move, maia, maia_policy_cache)
+    policy = _predict_maia(
+        board_after_move,
+        maia,
+        maia_policy_cache,
+        maia3_white_elo=maia3_white_elo,
+        maia3_black_elo=maia3_black_elo,
+        history_fens=history_fens,
+    )
     if not policy:
         return None
 
@@ -184,11 +234,14 @@ def compute_epe(
 def compute_cti(
     board: chess.Board,
     stockfish: StockfishClient,
-    maia: MaiaClient,
+    maia: Maia3Client,
     acceptable_drop: float = 0.5,
     prev_eval: float | None = None,
     full_depth: int = 18,
     maia_policy_cache: MaiaPolicyCache | None = None,
+    maia3_white_elo: int = DEFAULT_MAIA3_ELO,
+    maia3_black_elo: int = DEFAULT_MAIA3_ELO,
+    history_fens: Sequence[str] | None = None,
 ) -> CTIResult | None:
     """Compute the Critical Tension Index for a position.
 
@@ -244,12 +297,12 @@ def compute_cti(
     # ----- Depth triage: reduce depth for lopsided positions -----
     analysis_depth = _select_depth(eval_estimate, full_depth)
 
-    # ----- Density-based adaptive MultiPV evaluation -----
-    # evaluate_all_moves uses the probe_eval to right-size MultiPV:
-    # it counts how many probe moves cluster within acceptable_drop + 0.3
-    # (safety margin) of the best, then uses that count for full-depth search.
+    # ----- Full legal-move evaluation for probability metrics -----
+    # CTI sums Maia probability across every objectively acceptable move.
+    # A capped MultiPV sample can miss quiet/equivalent moves and inflate CTI,
+    # so use complete legal-move coverage here.
     all_evals_with_pv, _ = stockfish.evaluate_all_moves(
-        board, acceptable_drop=acceptable_drop, depth=analysis_depth, probe_eval=eval_estimate
+        board, acceptable_drop=0.0, depth=analysis_depth, probe_eval=eval_estimate
     )
     if not all_evals_with_pv:
         return None
@@ -266,7 +319,14 @@ def compute_cti(
     if not good_moves:
         # Edge case: no moves within acceptable_drop (shouldn't normally happen
         # since the best move itself should qualify). CTI = 1.0 (maximum difficulty).
-        policy = _predict_maia(board, maia, maia_policy_cache)
+        policy = _predict_maia(
+            board,
+            maia,
+            maia_policy_cache,
+            maia3_white_elo=maia3_white_elo,
+            maia3_black_elo=maia3_black_elo,
+            history_fens=history_fens,
+        )
         return CTIResult(
             cti=1.0,
             good_moves=[],
@@ -278,7 +338,14 @@ def compute_cti(
         )
 
     # ----- Sum Maia probabilities for moves in set S -----
-    policy = _predict_maia(board, maia, maia_policy_cache)
+    policy = _predict_maia(
+        board,
+        maia,
+        maia_policy_cache,
+        maia3_white_elo=maia3_white_elo,
+        maia3_black_elo=maia3_black_elo,
+        history_fens=history_fens,
+    )
     prob_sum = sum(policy.get(move, 0.0) for move in good_moves)
 
     # CTI = 1 - P(human plays a good move). Clamped to [0, 1].
@@ -300,7 +367,7 @@ def compute_cti(
 def populate_eval_after(
     move_results: list[AnalysisMoveData],
     mate_stm_per_pos: list[int | None],
-    positions: list[tuple[chess.Board, chess.Move, int, str]],
+    positions: list[tuple[chess.Board, chess.Move, int, str, tuple[str, ...]]],
     stockfish: StockfishClient,
 ) -> None:
     """Fill in ``eval_after`` and ``mate_in`` fields on move-results.
@@ -344,7 +411,7 @@ def populate_eval_after(
         return
 
     # ----- Evaluate the final position for the last move's eval_after -----
-    last_board, last_move, _last_move_number, _last_side = positions[-1]
+    last_board, last_move, _last_move_number, _last_side, _last_history_fens = positions[-1]
     final_board = last_board.copy()
     final_board.push(last_move)
 

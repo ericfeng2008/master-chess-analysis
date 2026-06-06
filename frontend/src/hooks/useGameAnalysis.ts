@@ -11,6 +11,8 @@ interface GameAnalysisState {
   result: AnalyzeResult | null;
   selectedMoveIndex: number | null;
   error: string | null;
+  analysisMaia3WhiteElo: number | null;
+  analysisMaia3BlackElo: number | null;
 }
 
 export function useGameAnalysis() {
@@ -22,6 +24,8 @@ export function useGameAnalysis() {
     result: null,
     selectedMoveIndex: null,
     error: null,
+    analysisMaia3WhiteElo: null,
+    analysisMaia3BlackElo: null,
   });
 
   const controllerRef = useRef<AbortController | null>(null);
@@ -37,6 +41,8 @@ export function useGameAnalysis() {
       mbiOutlierThreshold: number,
       eigThreshold: number,
       briThreshold: number,
+      maia3WhiteElo: number,
+      maia3BlackElo: number,
     ) => {
       controllerRef.current?.abort();
 
@@ -48,6 +54,8 @@ export function useGameAnalysis() {
         result: null,
         selectedMoveIndex: null,
         error: null,
+        analysisMaia3WhiteElo: maia3WhiteElo,
+        analysisMaia3BlackElo: maia3BlackElo,
       });
 
       const controller = ssePost(
@@ -62,6 +70,8 @@ export function useGameAnalysis() {
           mbi_outlier_threshold: mbiOutlierThreshold,
           eig_threshold: eigThreshold,
           bri_threshold: briThreshold,
+          maia3_white_elo: maia3WhiteElo,
+          maia3_black_elo: maia3BlackElo,
         },
         (data) => {
           const event = data as AnalysisSSEEvent;

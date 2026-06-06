@@ -15,7 +15,7 @@ export interface VariationData {
 
 export interface ExploredVariationData {
   branchPointIndex: number;
-  moves: Array<{ san: string; fen: string }>;
+  moves: Array<{ san: string; fen: string; side?: "white" | "black"; moveNumber?: number }>;
 }
 
 interface PgnViewerProps {
@@ -163,17 +163,20 @@ function renderExplorationGroups(
   }
 
   return Array.from(groups.values()).map((group) => {
-    const firstMoveFen = group[0].ev.moves[0]?.fen ?? "";
-    const parts = firstMoveFen.split(" ");
-    const fenActiveColor = parts[1] ?? "w";
-    const firstExpSide: "white" | "black" = fenActiveColor === "w" ? "black" : "white";
-    const fenFullmove = parseInt(parts[5] ?? String(move.moveNumber), 10) || move.moveNumber;
-    const firstExpMoveNum = fenActiveColor === "w" ? fenFullmove - 1 : fenFullmove;
+    const firstMove = group[0].ev.moves[0];
+    const fallback = firstMove ? inferMoveNotationFromPostFen(firstMove.fen, move) : {
+      side: move.side,
+      moveNumber: move.moveNumber,
+    };
 
     const getExpSide = (ei: number) =>
-      firstExpSide === "white" ? (ei % 2 === 0 ? "white" : "black") : ei % 2 === 0 ? "black" : "white";
+      group[0].ev.moves[ei]?.side ??
+      (fallback.side === "white" ? (ei % 2 === 0 ? "white" : "black") : ei % 2 === 0 ? "black" : "white");
     const getExpMoveNum = (ei: number) =>
-      firstExpSide === "white" ? firstExpMoveNum + Math.floor(ei / 2) : firstExpMoveNum + Math.floor((ei + 1) / 2);
+      group[0].ev.moves[ei]?.moveNumber ??
+      (fallback.side === "white"
+        ? fallback.moveNumber + Math.floor(ei / 2)
+        : fallback.moveNumber + Math.floor((ei + 1) / 2));
 
     let prefixLen = group[0].ev.moves.length;
     for (let g = 1; g < group.length; g += 1) {
@@ -270,4 +273,16 @@ function renderExplorationGroups(
       </span>
     );
   });
+}
+
+function inferMoveNotationFromPostFen(
+  fen: string,
+  fallbackMove: ParsedMove,
+): { side: "white" | "black"; moveNumber: number } {
+  const parts = fen.split(" ");
+  const activeColor = parts[1] ?? "w";
+  const side: "white" | "black" = activeColor === "w" ? "black" : "white";
+  const fenFullmove = parseInt(parts[5] ?? String(fallbackMove.moveNumber), 10) || fallbackMove.moveNumber;
+  const moveNumber = activeColor === "w" ? fenFullmove - 1 : fenFullmove;
+  return { side, moveNumber };
 }

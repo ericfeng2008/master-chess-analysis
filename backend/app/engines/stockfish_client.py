@@ -123,6 +123,32 @@ class StockfishClient:
                 results[move] = (score.score(mate_score=10000) / 100.0, pv_line, mate)
         return results, best_probe_eval
 
+    def evaluate_move(
+        self,
+        board: chess.Board,
+        move: chess.Move,
+        depth: int | None = None,
+    ) -> tuple[float, list[chess.Move], int | None]:
+        """Evaluate one legal move from the current side-to-move perspective."""
+        if move not in board.legal_moves:
+            raise ValueError(f"Illegal move for position: {move.uci()}")
+
+        analysis_depth = depth if depth is not None else self.depth
+        board_after = board.copy()
+        board_after.push(move)
+
+        if board_after.is_game_over():
+            return 0.0, [move], None
+
+        info = self.engine.analyse(board_after, chess.engine.Limit(depth=analysis_depth))
+        score = info["score"].relative
+        mate = score.mate() if score.is_mate() else None
+        # Engine score is from the opponent's perspective after the move.
+        # Negate it to express the move value from the original side to move.
+        eval_from_current_stm = -score.score(mate_score=10000) / 100.0
+        pv_line = [move, *info.get("pv", [])]
+        return eval_from_current_stm, pv_line, -mate if mate is not None else None
+
     def evaluate_position(
         self,
         board: chess.Board,

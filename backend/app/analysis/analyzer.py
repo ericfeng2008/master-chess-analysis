@@ -17,7 +17,8 @@ from typing import Generator
 import chess
 import chess.pgn
 
-from app.engines.maia_client import MaiaClient
+from app.config import DEFAULT_MAIA3_ELO
+from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 from app.analysis.data_models import (
     AnalysisCompleteEvent,
@@ -25,14 +26,14 @@ from app.analysis.data_models import (
     AnalysisProgressEvent,
     SKIP_EVAL_THRESHOLD,
 )
-from app.analysis.metrics import compute_cti, compute_epe, populate_eval_after
+from app.analysis.metrics import MaiaPolicyCache, compute_cti, compute_epe, populate_eval_after
 from app.pgn_utils import normalize_pgn_for_python_chess
 
 
 def analyze_game(
     pgn_text: str,
     stockfish: StockfishClient,
-    maia: MaiaClient,
+    maia: Maia3Client,
     acceptable_drop: float = 0.5,
     minefield_threshold: float = 0.80,
     blunder_threshold: float = 1.0,
@@ -40,6 +41,8 @@ def analyze_game(
     mbi_outlier_threshold: float = 0.05,
     eig_threshold: float = 2.0,
     bri_threshold: float = 0.05,
+    maia3_white_elo: int = DEFAULT_MAIA3_ELO,
+    maia3_black_elo: int = DEFAULT_MAIA3_ELO,
 ) -> Generator[AnalysisProgressEvent | AnalysisCompleteEvent, None, None]:
     """Analyze every position in a PGN game, yielding SSE-streaming events.
 
@@ -84,7 +87,8 @@ def analyze_game(
         return
 
     # ----- Walk the mainline and collect (board, move, move_number, side) tuples -----
-    positions: list[tuple[chess.Board, chess.Move, int, str]] = []
+    positions: list[tuple[chess.Board, chess.Move, int, str, tuple[str, ...]]] = []
+    history_fens: list[str] = [game.board().fen()]
     node = game
     half_move = 0
     while node.variations:
@@ -93,7 +97,10 @@ def analyze_game(
         move = next_node.move
         move_number = half_move // 2 + 1
         side = "white" if board.turn == chess.WHITE else "black"
-        positions.append((board.copy(), move, move_number, side))
+        positions.append((board.copy(), move, move_number, side, tuple(history_fens)))
+        board_after = board.copy()
+        board_after.push(move)
+        history_fens.append(board_after.fen())
         node = next_node
         half_move += 1
 
@@ -111,9 +118,9 @@ def analyze_game(
 
     # Reuse Maia policy calls across CTI and EPE. The post-move board used by
     # EPE is commonly the next loop iteration's pre-move board.
-    maia_policy_cache: dict[str, dict[chess.Move, float]] = {}
+    maia_policy_cache: MaiaPolicyCache = {}
 
-    for idx, (board, move, move_number, side) in enumerate(positions):
+    for idx, (board, move, move_number, side, position_history_fens) in enumerate(positions):
         is_white = side == "white"
 
         # Core CTI computation (also provides engine-evals and Maia policy
@@ -126,6 +133,9 @@ def analyze_game(
             prev_eval=prev_eval,
             full_depth=stockfish.depth,
             maia_policy_cache=maia_policy_cache,
+            maia3_white_elo=maia3_white_elo,
+            maia3_black_elo=maia3_black_elo,
+            history_fens=position_history_fens,
         )
 
         if result is not None:
@@ -164,10 +174,13 @@ def analyze_game(
             if played_move_eval is not None:
                 eval_drop = result.best_eval - played_move_eval
             else:
-                # Played move not in multi-PV results (rare, happens when
-                # adaptive MultiPV didn't include it). Use a pessimistic
-                # estimate: worst eval in the set + 0.5 pawn penalty.
-                eval_drop = result.best_eval - min(result.all_evals.values()) + 0.5
+                # Played move not in the sampled eval map. Evaluate it
+                # explicitly so MBI is based on the actual played move rather
+                # than a pessimistic proxy.
+                played_move_eval, _played_pv, _played_mate = stockfish.evaluate_move(
+                    board, move, depth=stockfish.depth
+                )
+                eval_drop = result.best_eval - played_move_eval
 
             if eval_drop >= blunder_threshold:
                 maia_prob_for_played = result.maia_policy.get(move, 0.0)
@@ -222,6 +235,7 @@ def analyze_game(
             # lookahead and just use the raw eval (result is obvious).
             board_after = board.copy()
             board_after.push(move)
+            post_move_history_fens = (*position_history_fens, board_after.fen())
             if abs(white_eval) >= SKIP_EVAL_THRESHOLD:
                 epe_score = round(white_eval, 2)
             else:
@@ -230,6 +244,9 @@ def analyze_game(
                     stockfish,
                     maia,
                     maia_policy_cache=maia_policy_cache,
+                    maia3_white_elo=maia3_white_elo,
+                    maia3_black_elo=maia3_black_elo,
+                    history_fens=post_move_history_fens,
                 )
 
             # Convert PV moves to SAN notation, stopping at 6 moves or

@@ -58,6 +58,8 @@ export function AnalyzerPage() {
   const [mbiOutlierThreshold, setMbiOutlierThreshold] = useState(0.05);
   const [eigThreshold, setEigThreshold] = useState(2.0);
   const [briThreshold, setBriThreshold] = useState(0.05);
+  const [maia3WhiteElo, setMaia3WhiteElo] = useState(2200);
+  const [maia3BlackElo, setMaia3BlackElo] = useState(2200);
 
   const [variationState, setVariationState] = useState<{ moveIndex: number; varIndex: number } | null>(null);
   const [showGameInfo, setShowGameInfo] = useState(false);
@@ -137,6 +139,8 @@ export function AnalyzerPage() {
     mbiOutlierThreshold,
     eigThreshold,
     briThreshold,
+    maia3WhiteElo,
+    maia3BlackElo,
     setPgn,
     setUploadSummary,
     setUploadError,
@@ -328,6 +332,10 @@ export function AnalyzerPage() {
                   headers={pgnHeaders}
                   showGameInfo={showGameInfo}
                   setShowGameInfo={setShowGameInfo}
+                  maia3WhiteElo={maia3WhiteElo}
+                  setMaia3WhiteElo={setMaia3WhiteElo}
+                  maia3BlackElo={maia3BlackElo}
+                  setMaia3BlackElo={setMaia3BlackElo}
                 />
 
                 <PgnViewer
@@ -341,7 +349,12 @@ export function AnalyzerPage() {
                   exploredVariations={(() => {
                     const all = exploration.savedExplorations.map((se) => ({
                       branchPointIndex: se.branchPointIndex,
-                      moves: se.moves.map((m) => ({ san: m.san, fen: m.fen })),
+                      moves: se.moves.map((m) => ({
+                        san: m.san,
+                        fen: m.fen,
+                        side: m.side,
+                        moveNumber: m.moveNumber,
+                      })),
                     }));
 
                     if (
@@ -351,7 +364,12 @@ export function AnalyzerPage() {
                     ) {
                       all.push({
                         branchPointIndex: exploration.branchPointIndex,
-                        moves: exploration.exploredMoves.map((m) => ({ san: m.san, fen: m.fen })),
+                        moves: exploration.exploredMoves.map((m) => ({
+                          san: m.san,
+                          fen: m.fen,
+                          side: m.side,
+                          moveNumber: m.moveNumber,
+                        })),
                       });
                     }
 
@@ -362,7 +380,12 @@ export function AnalyzerPage() {
                     ) {
                       all[exploration.activeSavedIndex] = {
                         branchPointIndex: exploration.branchPointIndex,
-                        moves: exploration.exploredMoves.map((m) => ({ san: m.san, fen: m.fen })),
+                        moves: exploration.exploredMoves.map((m) => ({
+                          san: m.san,
+                          fen: m.fen,
+                          side: m.side,
+                          moveNumber: m.moveNumber,
+                        })),
                       };
                     }
 
@@ -412,6 +435,8 @@ export function AnalyzerPage() {
               movesAnalyzed={cti.movesAnalyzed}
               totalMoves={cti.totalMoves}
               minefieldsFound={cti.minefieldsFound}
+              analysisMaia3WhiteElo={cti.analysisMaia3WhiteElo}
+              analysisMaia3BlackElo={cti.analysisMaia3BlackElo}
               error={cti.error}
               handleAnalyze={handlers.handleAnalyze}
               hasPgn={!!pgn}
@@ -439,7 +464,7 @@ function IntroPanel({ height }: { height: number | null }) {
         <span className="intro-kicker">Local analysis</span>
         <h2>Chess Review With Engine and Intuition</h2>
         <p>
-          Review PGN games with objective Stockfish evaluation and Maia-2200 human move-likelihood
+          Review PGN games with objective Stockfish evaluation and Maia3 human move-likelihood
           modeling. The analysis highlights practical difficulty, natural mistakes, intuition gaps,
           and brilliant moves that are hard for humans to find.
         </p>

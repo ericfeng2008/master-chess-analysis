@@ -6,6 +6,8 @@ import type { PositionEvalResult } from '../types';
 export interface ExploredMove {
   san: string;
   fen: string;
+  side: "white" | "black";
+  moveNumber: number;
   evalResult: PositionEvalResult | null;
 }
 
@@ -131,7 +133,8 @@ export function useExploration() {
       const box = { idx: -1 };
 
       setState((s: ExplorationState) => {
-        const newMove: ExploredMove = { san, fen: fenAfter, evalResult: null };
+        const { side, moveNumber } = moveNotationFromPreFen(preFen);
+        const newMove: ExploredMove = { san, fen: fenAfter, side, moveNumber, evalResult: null };
         const trimmed = s.exploredMoves.slice(0, s.currentExplorationIndex + 1);
         box.idx = trimmed.length;
 
@@ -250,4 +253,11 @@ export function useExploration() {
     exitExploration,
     enterSavedExploration,
   };
+}
+
+function moveNotationFromPreFen(fen: string): { side: "white" | "black"; moveNumber: number } {
+  const parts = fen.split(" ");
+  const side = parts[1] === "b" ? "black" : "white";
+  const moveNumber = parseInt(parts[5] ?? "1", 10) || 1;
+  return { side, moveNumber };
 }

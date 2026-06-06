@@ -51,8 +51,16 @@ Thumbs.db
 agent.md 
 CLAUDE.md
 .claude/
+.agents/
 openspec/
 
 
 # exclude big Maia2 model files
 backend/maia2_models/
+
+# Large local Maia3 checkpoints
+backend/model/maia3-79m.pt
+backend/model/*.pt
+backend/model/*.pth
+backend/model/*.ckpt
+backend/model/*.bin
