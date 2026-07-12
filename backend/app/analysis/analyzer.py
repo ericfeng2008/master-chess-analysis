@@ -27,6 +27,7 @@ from app.analysis.data_models import (
     SKIP_EVAL_THRESHOLD,
 )
 from app.analysis.metrics import MaiaPolicyCache, compute_cti, compute_epe, populate_eval_after
+from app.analysis.evaluation import terminal_eval_white
 from app.pgn_utils import normalize_pgn_for_python_chess
 
 
@@ -136,6 +137,8 @@ def analyze_game(
             maia3_white_elo=maia3_white_elo,
             maia3_black_elo=maia3_black_elo,
             history_fens=position_history_fens,
+            played_move=move,
+            minefield_threshold=minefield_threshold,
         )
 
         if result is not None:
@@ -155,9 +158,10 @@ def analyze_game(
             # Carry forward prev_eval for the next position (opponent's perspective)
             prev_eval = -stm_eval
 
-            is_minefield = result.cti is not None and result.cti >= minefield_threshold
+            # Refinement guarantees the bounds do not straddle the threshold.
+            is_minefield = result.cti_lower_bound >= minefield_threshold
 
-            best_move_obj = max(result.all_evals, key=result.all_evals.get)
+            best_move_obj = result.best_pv[0]
             # SAN map for good moves together with their eval drop from best (for UI display)
             good_moves_eval = {
                 board.san(m): round(result.all_evals[m] - result.best_eval, 2)
@@ -207,8 +211,9 @@ def analyze_game(
                     # Maia's top move wasn't in the multi-PV set -- evaluate it separately.
                     temp_board = board.copy()
                     temp_board.push(maia_top_move)
-                    if temp_board.is_game_over():
-                        maia_top_eval = 0.0
+                    terminal_eval = terminal_eval_white(temp_board)
+                    if terminal_eval is not None:
+                        maia_top_eval = terminal_eval if is_white else -terminal_eval
                     else:
                         # Negate because quick_evaluate returns from stm
                         # perspective of the resulting position, but we need
@@ -274,8 +279,9 @@ def analyze_game(
                 post_fen = var_board.fen()
 
                 if var_board.is_game_over():
+                    terminal_eval = terminal_eval_white(var_board)
                     best_line_evals[post_fen] = {
-                        "eval": 0.0,
+                        "eval": terminal_eval if terminal_eval is not None else 0.0,
                         "best_move": "",
                         "good_moves": [],
                         "good_moves_with_eval": {},
@@ -316,6 +322,10 @@ def analyze_game(
                 stockfish_eval=round(white_eval, 2),
                 eval_after=0.0,  # populated in post-processing pass
                 cti=result.cti,
+                cti_lower_bound=result.cti_lower_bound,
+                cti_upper_bound=result.cti_upper_bound,
+                cti_remaining_mass=result.cti_remaining_mass,
+                cti_is_approximate=result.cti_is_approximate,
                 best_move=board.san(best_move_obj),
                 good_moves=[board.san(m) for m in result.good_moves],
                 good_moves_with_eval=good_moves_eval,
@@ -362,6 +372,10 @@ def analyze_game(
                 stockfish_eval=round(white_eval, 2),
                 eval_after=0.0,  # populated in post-processing pass
                 cti=None,
+                cti_lower_bound=None,
+                cti_upper_bound=None,
+                cti_remaining_mass=None,
+                cti_is_approximate=False,
                 best_move=None,
                 good_moves=[],
                 good_moves_with_eval={},

@@ -30,6 +30,10 @@ class AnalysisMoveResult(BaseModel):
     stockfish_eval: float
     eval_after: float
     cti: float | None
+    cti_lower_bound: float | None = None
+    cti_upper_bound: float | None = None
+    cti_remaining_mass: float | None = None
+    cti_is_approximate: bool = False
     good_moves: list[str]
     good_moves_with_eval: dict[str, float]
     is_minefield: bool

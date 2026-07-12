@@ -22,6 +22,10 @@ export interface AnalysisMoveResult {
   stockfish_eval: number;
   eval_after: number;
   cti: number | null;
+  cti_lower_bound?: number | null;
+  cti_upper_bound?: number | null;
+  cti_remaining_mass?: number | null;
+  cti_is_approximate?: boolean;
   best_move: string | null;
   good_moves: string[];
   good_moves_with_eval: Record<string, number>;

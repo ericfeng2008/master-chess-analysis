@@ -20,11 +20,13 @@ from app.engines.stockfish_client import StockfishClient
 from app.analysis.data_models import (
     AnalysisMoveData,
     CTIResult,
+    CTI_POLICY_COVERAGE,
     MIN_ANALYSIS_DEPTH,
     PROBE_DEPTH,
     EPE_CUMULATIVE_CUTOFF,
     EPE_MAX_MOVES,
 )
+from app.analysis.evaluation import terminal_eval_white
 
 
 MaiaPolicyCacheKey = tuple[str, bool, int, int, str, tuple[str, ...]]
@@ -197,8 +199,9 @@ def compute_epe(
         temp_board = board_after_move.copy()
         temp_board.push(move)
 
-        if temp_board.is_game_over():
-            white_eval = 0.0  # draw or stalemate
+        terminal_eval = terminal_eval_white(temp_board)
+        if terminal_eval is not None:
+            white_eval = terminal_eval
         else:
             # Stockfish returns eval from side-to-move perspective;
             # negate for Black so all evals are from White's perspective.
@@ -242,6 +245,8 @@ def compute_cti(
     maia3_white_elo: int = DEFAULT_MAIA3_ELO,
     maia3_black_elo: int = DEFAULT_MAIA3_ELO,
     history_fens: Sequence[str] | None = None,
+    played_move: chess.Move | None = None,
+    minefield_threshold: float | None = None,
 ) -> CTIResult | None:
     """Compute the Critical Tension Index for a position.
 
@@ -253,10 +258,11 @@ def compute_cti(
     who is winning -- a position at +5.0 can still be a minefield if only
     one capture among many is correct.
 
-    The function uses density-based adaptive MultiPV (two-phase approach):
-      1. Phase 1 (Probe): Cheap shallow search to see how top moves cluster.
-         Skipped when ``prev_eval`` is provided (carry-forward from prior position).
-      2. Phase 2 (Full-depth): MultiPV is right-sized based on probe clustering.
+    Stockfish evaluates its unrestricted best root plus the smallest prefix of
+    Maia moves covering ``CTI_POLICY_COVERAGE`` probability. The unevaluated
+    policy tail is represented as a formal CTI interval. If that interval can
+    change minefield classification, additional roots are evaluated in Maia
+    probability order until the classification is unambiguous.
 
     Positions with <= 6 pieces (endgame tablebases territory) or only one
     legal move are skipped (returns None).
@@ -289,7 +295,7 @@ def compute_cti(
     if len(board.piece_map()) <= 6:
         return None
 
-    # ----- Eval estimate for depth selection and MultiPV probe -----
+    # ----- Eval estimate for depth selection -----
     # Use carry-forward eval from the previous position if available;
     # otherwise run a quick shallow search as the Phase 1 probe.
     eval_estimate = prev_eval if prev_eval is not None else stockfish.quick_evaluate(board, depth=PROBE_DEPTH)
@@ -297,47 +303,6 @@ def compute_cti(
     # ----- Depth triage: reduce depth for lopsided positions -----
     analysis_depth = _select_depth(eval_estimate, full_depth)
 
-    # ----- Full legal-move evaluation for probability metrics -----
-    # CTI sums Maia probability across every objectively acceptable move.
-    # A capped MultiPV sample can miss quiet/equivalent moves and inflate CTI,
-    # so use complete legal-move coverage here.
-    all_evals_with_pv, _ = stockfish.evaluate_all_moves(
-        board, acceptable_drop=0.0, depth=analysis_depth, probe_eval=eval_estimate
-    )
-    if not all_evals_with_pv:
-        return None
-
-    # Extract just the eval values for convenience
-    all_evals = {m: ev for m, (ev, _pv, _mate) in all_evals_with_pv.items()}
-    best_move_obj = max(all_evals, key=all_evals.get)
-    best_eval = all_evals[best_move_obj]
-    best_pv = all_evals_with_pv[best_move_obj][1]
-    best_mate = all_evals_with_pv[best_move_obj][2]
-
-    # ----- Compute set S: moves within acceptable_drop of the best move -----
-    good_moves = [move for move, ev in all_evals.items() if best_eval - ev <= acceptable_drop]
-    if not good_moves:
-        # Edge case: no moves within acceptable_drop (shouldn't normally happen
-        # since the best move itself should qualify). CTI = 1.0 (maximum difficulty).
-        policy = _predict_maia(
-            board,
-            maia,
-            maia_policy_cache,
-            maia3_white_elo=maia3_white_elo,
-            maia3_black_elo=maia3_black_elo,
-            history_fens=history_fens,
-        )
-        return CTIResult(
-            cti=1.0,
-            good_moves=[],
-            best_eval=best_eval,
-            best_mate=best_mate,
-            all_evals=all_evals,
-            maia_policy=policy,
-            best_pv=best_pv,
-        )
-
-    # ----- Sum Maia probabilities for moves in set S -----
     policy = _predict_maia(
         board,
         maia,
@@ -346,13 +311,95 @@ def compute_cti(
         maia3_black_elo=maia3_black_elo,
         history_fens=history_fens,
     )
-    prob_sum = sum(policy.get(move, 0.0) for move in good_moves)
+    if not policy:
+        return None
 
-    # CTI = 1 - P(human plays a good move). Clamped to [0, 1].
-    cti = 1.0 - prob_sum
+    sorted_policy = sorted(
+        ((move, prob) for move, prob in policy.items() if move in board.legal_moves),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if not sorted_policy:
+        return None
+
+    best_result = stockfish.evaluate_best_move(board, depth=analysis_depth)
+    if best_result is None:
+        return None
+    best_move_obj, best_eval, best_pv, best_mate = best_result
+
+    candidate_moves: list[chess.Move] = []
+    candidate_set: set[chess.Move] = set()
+    cumulative = 0.0
+    for candidate, probability in sorted_policy:
+        candidate_moves.append(candidate)
+        candidate_set.add(candidate)
+        cumulative += probability
+        if cumulative >= CTI_POLICY_COVERAGE:
+            break
+
+    # These roots are required by best-line/BRI, EIG, and MBI respectively.
+    required_moves = [best_move_obj, sorted_policy[0][0]]
+    if played_move is not None:
+        required_moves.append(played_move)
+    for required in required_moves:
+        if required in board.legal_moves and required not in candidate_set:
+            candidate_moves.append(required)
+            candidate_set.add(required)
+
+    def evaluate_candidates(
+        moves: Sequence[chess.Move],
+    ) -> dict[chess.Move, tuple[float, list[chess.Move], int | None]]:
+        results = stockfish.evaluate_root_moves(board, list(moves), depth=analysis_depth)
+        # UCI engines should return every requested root. Preserve a complete
+        # uncertainty accounting even if an individual MultiPV line is absent.
+        for missing in moves:
+            if missing not in results:
+                results[missing] = stockfish.evaluate_move(board, missing, depth=analysis_depth)
+        return results
+
+    evaluated = evaluate_candidates(candidate_moves)
+    # Preserve the unrestricted best search as the objective baseline and PV.
+    evaluated[best_move_obj] = (best_eval, best_pv, best_mate)
+
+    def summarize() -> tuple[list[chess.Move], float, float, float, float]:
+        good = [
+            candidate
+            for candidate, (evaluation, _pv, _mate) in evaluated.items()
+            if best_eval - evaluation <= acceptable_drop
+        ]
+        good_probability = sum(policy.get(candidate, 0.0) for candidate in good)
+        remaining_probability = sum(
+            probability for candidate, probability in sorted_policy if candidate not in evaluated
+        )
+        lower = max(0.0, min(1.0, 1.0 - good_probability - remaining_probability))
+        upper = max(0.0, min(1.0, 1.0 - good_probability))
+        return good, lower, upper, remaining_probability, (lower + upper) / 2.0
+
+    good_moves, lower_bound, upper_bound, remaining_mass, cti = summarize()
+
+    # Refine only when the uncertainty could change minefield classification.
+    if minefield_threshold is not None:
+        remaining_moves = [move for move, _prob in sorted_policy if move not in evaluated]
+        while lower_bound < minefield_threshold <= upper_bound and remaining_moves:
+            batch = remaining_moves[:3]
+            remaining_moves = remaining_moves[3:]
+            new_results = evaluate_candidates(batch)
+            evaluated.update(new_results)
+            good_moves, lower_bound, upper_bound, remaining_mass, cti = summarize()
+
+    exact = remaining_mass <= 1e-12
+    if exact:
+        remaining_mass = 0.0
+        lower_bound = upper_bound = cti
+
+    all_evals = {move: result[0] for move, result in evaluated.items()}
 
     return CTIResult(
-        cti=round(max(0.0, min(1.0, cti)), 4),
+        cti=max(0.0, min(1.0, cti)),
+        cti_lower_bound=lower_bound,
+        cti_upper_bound=upper_bound,
+        cti_remaining_mass=remaining_mass,
+        cti_is_approximate=not exact,
         good_moves=good_moves,
         best_eval=best_eval,
         best_mate=best_mate,
@@ -415,12 +462,10 @@ def populate_eval_after(
     final_board = last_board.copy()
     final_board.push(last_move)
 
-    if final_board.is_game_over():
-        final_eval_white = 0.0
-        final_mate_white: int | None = None
-        if final_board.is_checkmate():
-            # Side to move is checkmated, so White mates iff Black is to move.
-            final_mate_white = 0 if final_board.turn == chess.BLACK else 0
+    terminal_eval = terminal_eval_white(final_board)
+    if terminal_eval is not None:
+        final_eval_white = terminal_eval
+        final_mate_white: int | None = 0 if final_board.is_checkmate() else None
     else:
         final_stm, final_mate_stm = stockfish.quick_evaluate_with_mate(final_board)
         # Normalize from side-to-move to White's perspective

@@ -14,37 +14,17 @@ class FakeMaia:
         self.policy = policy
 
     def predict(self, board, elo=2200, self_elo=None, opponent_elo=None, history_fens=None):
-        legal_policy = {move: prob for move, prob in self.policy.items() if move in board.legal_moves}
-        if legal_policy:
-            return legal_policy
-        return {next(iter(board.legal_moves)): 1.0}
+        return {move: prob for move, prob in self.policy.items() if move in board.legal_moves}
 
 
-class CtiStockfish:
+class CandidateStockfish:
     depth = 12
 
-    def __init__(self):
-        self.acceptable_drops = []
-
-    def quick_evaluate(self, board, depth=8):
-        return 0.0
-
-    def evaluate_all_moves(self, board, acceptable_drop=0.0, depth=None, probe_eval=None):
-        self.acceptable_drops.append(acceptable_drop)
-        moves = list(board.legal_moves)
-        return {
-            moves[0]: (1.0, [moves[0]], None),
-            moves[1]: (0.8, [moves[1]], None),
-            moves[2]: (0.0, [moves[2]], None),
-        }, 1.0
-
-
-class AnalyzerStockfish:
-    depth = 12
-
-    def __init__(self, played_move):
-        self.played_move = played_move
-        self.evaluate_move_calls = []
+    def __init__(self, best_move, evaluations):
+        self.best_move = best_move
+        self.evaluations = evaluations
+        self.root_calls: list[tuple[chess.Move, ...]] = []
+        self.evaluate_move_calls: list[chess.Move] = []
 
     def quick_evaluate(self, board, depth=8):
         return 0.0
@@ -52,14 +32,22 @@ class AnalyzerStockfish:
     def quick_evaluate_with_mate(self, board, depth=8):
         return 0.0, None
 
-    def evaluate_all_moves(self, board, acceptable_drop=0.0, depth=None, probe_eval=None):
-        legal_moves = list(board.legal_moves)
-        sampled_move = next(move for move in legal_moves if move != self.played_move)
-        return {sampled_move: (1.0, [sampled_move], None)}, 1.0
+    def evaluate_best_move(self, board, depth=None):
+        value = self.evaluations[self.best_move]
+        return self.best_move, value, [self.best_move], None
+
+    def evaluate_root_moves(self, board, root_moves, depth=None):
+        roots = tuple(root_moves)
+        self.root_calls.append(roots)
+        return {
+            move: (self.evaluations[move], [move], None)
+            for move in roots
+            if move in self.evaluations
+        }
 
     def evaluate_move(self, board, move, depth=None):
         self.evaluate_move_calls.append(move)
-        return 0.95, [move], None
+        return self.evaluations[move], [move], None
 
     def evaluate_position(self, board, depth=12, acceptable_drop=0.5):
         return {
@@ -70,44 +58,120 @@ class AnalyzerStockfish:
         }
 
 
+def concentrated_policy(board: chess.Board, top_probability: float = 0.996):
+    moves = list(board.legal_moves)
+    tail = (1.0 - top_probability) / (len(moves) - 1)
+    return moves, {move: top_probability if i == 0 else tail for i, move in enumerate(moves)}
+
+
 class MetricStockfishCoverageTests(unittest.TestCase):
-    def test_cti_requests_full_legal_move_coverage(self):
+    def test_cti_uses_probability_bounded_roots_and_required_moves(self):
         board = chess.Board()
-        moves = list(board.legal_moves)
-        maia = FakeMaia({moves[0]: 0.2, moves[1]: 0.3, moves[2]: 0.5})
-        stockfish = CtiStockfish()
+        moves, policy = concentrated_policy(board)
+        best_move = moves[1]
+        played_move = moves[2]
+        evaluations = {move: (1.0 if move == best_move else 0.0) for move in moves}
+        stockfish = CandidateStockfish(best_move, evaluations)
 
         result = compute_cti(
             board,
             stockfish,
-            maia,
+            FakeMaia(policy),
+            acceptable_drop=0.5,
+            full_depth=12,
+            played_move=played_move,
+        )
+
+        self.assertIsNotNone(result)
+        first_roots = set(stockfish.root_calls[0])
+        self.assertEqual(first_roots, {moves[0], best_move, played_move})
+        self.assertLess(len(first_roots), board.legal_moves.count())
+        self.assertTrue(result.cti_is_approximate)
+        self.assertLessEqual(result.cti_remaining_mass, 0.005)
+
+    def test_full_reference_cti_is_inside_reported_bounds(self):
+        board = chess.Board()
+        moves, policy = concentrated_policy(board)
+        best_move = moves[1]
+        evaluations = {move: 1.0 if move in {best_move, moves[-1]} else 0.0 for move in moves}
+        result = compute_cti(
+            board,
+            CandidateStockfish(best_move, evaluations),
+            FakeMaia(policy),
             acceptable_drop=0.5,
             full_depth=12,
         )
 
-        self.assertEqual(stockfish.acceptable_drops, [0.0])
-        self.assertIsNotNone(result)
-        self.assertEqual(set(result.good_moves), {moves[0], moves[1]})
-        self.assertEqual(result.cti, 0.5)
+        exact_good_mass = policy[best_move] + policy[moves[-1]]
+        exact_cti = 1.0 - exact_good_mass
+        self.assertLessEqual(result.cti_lower_bound, exact_cti)
+        self.assertGreaterEqual(result.cti_upper_bound, exact_cti)
 
-    def test_mbi_evaluates_played_move_when_missing_from_stockfish_map(self):
+    def test_minefield_bounds_below_threshold_do_not_refine(self):
         board = chess.Board()
-        played_move = chess.Move.from_uci("e2e4")
-        stockfish = AnalyzerStockfish(played_move)
-        maia = FakeMaia({played_move: 0.9})
+        moves, policy = concentrated_policy(board)
+        evaluations = {move: 1.0 for move in moves}
+        stockfish = CandidateStockfish(moves[0], evaluations)
 
-        events = list(
-            analyze_game(
-                "1. e4 *",
-                stockfish,
-                maia,
-                blunder_threshold=1.0,
-            )
+        result = compute_cti(
+            board,
+            stockfish,
+            FakeMaia(policy),
+            minefield_threshold=0.8,
         )
 
-        complete = events[-1]
-        self.assertEqual(stockfish.evaluate_move_calls, [played_move])
-        self.assertIsNone(complete.moves[0].mbi_classification)
+        self.assertLess(result.cti_upper_bound, 0.8)
+        self.assertEqual(len(stockfish.root_calls), 1)
+
+    def test_minefield_bounds_above_threshold_do_not_refine(self):
+        board = chess.Board()
+        moves, policy = concentrated_policy(board)
+        best_move = moves[1]
+        evaluations = {move: 1.0 if move == best_move else 0.0 for move in moves}
+        stockfish = CandidateStockfish(best_move, evaluations)
+
+        result = compute_cti(
+            board,
+            stockfish,
+            FakeMaia(policy),
+            acceptable_drop=0.5,
+            minefield_threshold=0.8,
+        )
+
+        self.assertGreaterEqual(result.cti_lower_bound, 0.8)
+        self.assertEqual(len(stockfish.root_calls), 1)
+
+    def test_straddling_minefield_bounds_refine_to_exact(self):
+        board = chess.Board()
+        moves, policy = concentrated_policy(board)
+        evaluations = {move: 1.0 for move in moves}
+        stockfish = CandidateStockfish(moves[0], evaluations)
+
+        result = compute_cti(
+            board,
+            stockfish,
+            FakeMaia(policy),
+            acceptable_drop=0.5,
+            minefield_threshold=0.002,
+        )
+
+        self.assertGreater(len(stockfish.root_calls), 1)
+        self.assertLess(result.cti_upper_bound, 0.002)
+        self.assertLess(result.cti_remaining_mass, 0.004)
+
+    def test_analyzer_includes_played_move_without_fallback_call(self):
+        board = chess.Board()
+        moves, policy = concentrated_policy(board)
+        played_move = chess.Move.from_uci("e2e4")
+        best_move = moves[1] if moves[1] != played_move else moves[2]
+        evaluations = {move: 1.0 if move == best_move else 0.95 for move in moves}
+        stockfish = CandidateStockfish(best_move, evaluations)
+
+        events = list(analyze_game("1. e4 *", stockfish, FakeMaia(policy)))
+
+        self.assertTrue(any(played_move in roots for roots in stockfish.root_calls))
+        self.assertEqual(stockfish.evaluate_move_calls, [])
+        self.assertIsNone(events[-1].moves[0].mbi_classification)
 
 
 if __name__ == "__main__":

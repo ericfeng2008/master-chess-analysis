@@ -3,7 +3,7 @@
 Master Chess Game Analyzer is a chess game analysis tool for reviewing PGN games with both objective engine evaluation and human move-likelihood modeling. It combines:
 
 - **Stockfish**, a strong open-source chess engine, for objective position evaluation. Stockfish searches for the best continuations, scores positions in pawn-equivalent evaluations, and identifies which candidate moves preserve or lose objective value.
-- **Maia-2200**, a neural-network chess model for human move prediction. Maia is trained from real human games and rating-calibrated to predict moves that players at a given strength are likely to choose; this project uses the 2200-rated model. See the Maia project at https://github.com/CSSLab/maia-chess. The required Maia model file is included in this repository.
+- **Maia3-79M**, a history-aware neural-network chess model for human move prediction. Maia3 uses the current position, recent position history, and separate player/opponent Elo ratings to estimate the probability of every legal move.
 
 Together, Stockfish and Maia compute a suite of analysis metrics that go beyond traditional engine analysis.
 
@@ -44,8 +44,8 @@ Analysis runs locally on your machine — no cloud services, no data sent extern
 # Node.js and Python
 brew install node python pipenv
 
-# Chess engines
-brew install stockfish lc0
+# Chess engine
+brew install stockfish
 ```
 
 ### Linux (Ubuntu/Debian)
@@ -62,8 +62,6 @@ pip3 install pipenv
 # Stockfish
 sudo apt-get install -y stockfish
 
-# lc0 - build from source or download binary
-# See https://github.com/LeelaChessZero/lc0 for instructions
 ```
 
 ## Setup
@@ -83,6 +81,22 @@ cd frontend
 npm install
 cd ..
 ```
+
+### Download the Maia3 Model
+
+The Maia3 checkpoint is approximately 316 MB and is intentionally not committed to this repository. Before starting the backend:
+
+1. Open the [Maia3-79M checkpoint page](https://huggingface.co/UofTCSSLab/Maia3-79M/blob/main/maia3-79m.pt).
+2. Use the page's download control and verify that the downloaded file is named `maia3-79m.pt` rather than an HTML page.
+3. Create the repository-relative model directory if it does not exist, then place the file at `backend/model/maia3-79m.pt`:
+
+```bash
+mkdir -p backend/model
+# Copy or move the downloaded file to:
+# backend/model/maia3-79m.pt
+```
+
+The checkpoint path is Git-ignored. If the file is missing or has a different name, backend startup stops with a missing-checkpoint error that identifies the expected path.
 
 ## Running the Application
 
@@ -117,9 +131,6 @@ If your engines are installed in non-default locations, or you want to tune engi
 | Variable | Default | Description |
 |---|---|---|
 | `ANALYSIS_STOCKFISH_PATH` | `/opt/homebrew/bin/stockfish` | Path to Stockfish binary |
-| `ANALYSIS_LC0_PATH` | `/opt/homebrew/Cellar/lc0/0.32.1/bin/lc0` | Path to lc0 binary |
-| `ANALYSIS_MAIA_WEIGHTS_PATH` | `./model/maia-2200.pb.gz` | Path to Maia weight file |
-| `ANALYSIS_LC0_BACKEND` | `eigen` | lc0 compute backend (`eigen` for CPU, `cuda` for NVIDIA GPU, `metal` for Apple GPU) |
 | `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `12` | Backend fallback Stockfish search depth (higher = more accurate but slower) |
 | `ANALYSIS_STOCKFISH_THREADS` | `0` (auto) | CPU threads for Stockfish (`0` = auto-detect: `cpu_count - 1`) |
 | `ANALYSIS_STOCKFISH_HASH_MB` | `256` | Stockfish hash table size in MB (more = better for deep analysis) |
@@ -128,8 +139,6 @@ Example:
 
 ```bash
 export ANALYSIS_STOCKFISH_PATH=/usr/games/stockfish
-export ANALYSIS_LC0_PATH=/usr/local/bin/lc0
-export ANALYSIS_MAIA_WEIGHTS_PATH=/path/to/maia-2200.pb.gz
 ./run-backend.sh
 ```
 
@@ -142,6 +151,8 @@ Click **Upload PGN File** next to the move navigator below the chess board. Sele
 ### 2. Configure Analysis Parameters
 
 The **Analysis Configuration** panel displays 8 configurable sliders organized in two columns.
+
+The game information area also provides separate **White Maia3** and **Black Maia3** Elo controls. Both default to `2200`; select the ratings that best represent each player before starting analysis.
 
 **Left column:**
 - **Stockfish Engine Depth** (10-20, default 12): Higher depth = more accurate but slower analysis
@@ -194,6 +205,8 @@ CTI measures how hard it is for a human to find a good move. It works by asking:
 - **CTI = 1.0**: No move that humans are likely to play is objectively acceptable. Extremely hard.
 
 CTI applies to any position regardless of evaluation. A position can be +5.0 in White's favor and still have high CTI if the winning moves are hard to find.
+
+For performance, CTI evaluates Stockfish roots covering at least 99.5% of Maia3's move probability and reports the small unevaluated tail as an uncertainty interval. Approximate values use an `≈` marker; positions near the minefield threshold are refined until their classification is unambiguous.
 
 **Chart display**: Green line (White's moves), orange line (Black's moves).
 
@@ -279,6 +292,8 @@ When a forced checkmate exists, the position info shows `#N` (White mates in N) 
 | MBI: Outlier Probability | 5% | 1%-20% | Maia probability below which a blunder is a Random Oversight |
 | EIG: Gap Threshold | 2.0 | 0.5-5.0 | Min eval gap (pawns) to flag an Engine-Intuition Gap |
 | BRI: Brilliancy Threshold | 5% | 1%-20% | Max Maia probability for best move to be "Brilliant" |
+| White Maia3 Elo | 2200 | 2000, 2200, 2400, 2600 | White player's rating context for Maia3 |
+| Black Maia3 Elo | 2200 | 2000, 2200, 2400, 2600 | Black player's rating context for Maia3 |
 
 ## License
 

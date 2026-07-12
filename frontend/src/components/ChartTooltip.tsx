@@ -6,6 +6,7 @@ export interface ChartDataPoint {
   evalNegative: number;
   ctiWhite: number | null;
   ctiBlack: number | null;
+  ctiApproximate: boolean;
   epe: number | null;
   mbi_classification: string | null;
   mbi_maia_prob: number | null;
@@ -39,7 +40,7 @@ export function CustomTooltip({
       </p>
       <p className="text-[var(--insight)]">Eval: {d.mate_in !== null ? `#${d.mate_in}` : d.raw_eval.toFixed(2)}</p>
       <p style={{ color: d.side === "white" ? "var(--success)" : "var(--warning)" }}>
-        CTI: {ctiValue !== null ? ctiValue.toFixed(4) : "N/A"}
+        CTI: {ctiValue !== null ? `${d.ctiApproximate ? "≈" : ""}${ctiValue.toFixed(d.ctiApproximate ? 3 : 4)}` : "N/A"}
       </p>
       {d.epe !== null && <p className="text-[var(--violet)]">EPE: {d.epe.toFixed(2)}</p>}
       {d.mbi_classification !== null && (

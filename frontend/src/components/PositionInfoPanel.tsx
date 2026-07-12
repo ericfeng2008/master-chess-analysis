@@ -8,6 +8,10 @@ type AnalysisMoveLike = {
   stockfish_eval: number;
   eval_after: number;
   cti: number | null;
+  cti_lower_bound?: number | null;
+  cti_upper_bound?: number | null;
+  cti_remaining_mass?: number | null;
+  cti_is_approximate?: boolean;
   best_move: string | null;
   good_moves: string[];
   good_moves_with_eval: Record<string, number>;
@@ -247,7 +251,7 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
       <div>
         <span className="metric-label">CTI:</span>{" "}
         <span style={{ color: s.side === "white" ? "var(--success)" : "var(--warning)" }}>
-          {s.cti !== null ? s.cti.toFixed(4) : "N/A"}
+          {formatCti(s)}
         </span>
       </div>
       <div>
@@ -325,6 +329,20 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
       )}
     </div>
   );
+}
+
+function formatCti(move: AnalysisMoveLike): string {
+  if (move.cti === null) {
+    return "N/A";
+  }
+  if (
+    move.cti_is_approximate &&
+    move.cti_lower_bound != null &&
+    move.cti_upper_bound != null
+  ) {
+    return `≈${move.cti.toFixed(3)} (${move.cti_lower_bound.toFixed(3)}–${move.cti_upper_bound.toFixed(3)})`;
+  }
+  return move.cti.toFixed(4);
 }
 
 function buildBestLineFens(startFen: string, line: readonly string[]) {
