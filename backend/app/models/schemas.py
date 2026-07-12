@@ -18,6 +18,8 @@ class AnalyzeRequest(BaseModel):
     mbi_outlier_threshold: float = Field(default=0.05, ge=0.01, le=0.20)
     eig_threshold: float = Field(default=2.0, ge=0.5, le=5.0)
     bri_threshold: float = Field(default=0.05, ge=0.01, le=0.20)
+    maia3_white_elo: int = Field(default=2200, ge=0, le=5000)
+    maia3_black_elo: int = Field(default=2200, ge=0, le=5000)
 
 
 class AnalysisMoveResult(BaseModel):
@@ -28,6 +30,10 @@ class AnalysisMoveResult(BaseModel):
     stockfish_eval: float
     eval_after: float
     cti: float | None
+    cti_lower_bound: float | None = None
+    cti_upper_bound: float | None = None
+    cti_remaining_mass: float | None = None
+    cti_is_approximate: bool = False
     good_moves: list[str]
     good_moves_with_eval: dict[str, float]
     is_minefield: bool

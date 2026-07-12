@@ -3,6 +3,12 @@ import os
 import chess
 import chess.engine
 
+from app.analysis.evaluation import (
+    MATE_SCORE_CENTIPAWNS,
+    MATE_SCORE_PAWNS,
+    terminal_eval_white,
+)
+
 
 def extract_mate(score: chess.engine.PovScore) -> int | None:
     """Return mate distance from side-to-move perspective, or None if no forced mate."""
@@ -25,27 +31,81 @@ class StockfishClient:
         """Return evaluation in pawns from side-to-move perspective."""
         info = self.engine.analyse(board, chess.engine.Limit(depth=self.depth))
         score = info["score"].relative
-        return score.score(mate_score=10000) / 100.0
+        return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
 
     def quick_evaluate(self, board: chess.Board, depth: int = 8) -> float:
         """Fast low-depth evaluation from side-to-move perspective."""
         info = self.engine.analyse(board, chess.engine.Limit(depth=depth))
         score = info["score"].relative
-        return score.score(mate_score=10000) / 100.0
+        return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
 
     def quick_evaluate_with_pv(self, board: chess.Board, depth: int = 8) -> tuple[float, list[chess.Move]]:
         """Fast low-depth evaluation returning (eval, pv_line)."""
         info = self.engine.analyse(board, chess.engine.Limit(depth=depth))
         score = info["score"].relative
         pv_line = info.get("pv", [])
-        return score.score(mate_score=10000) / 100.0, pv_line
+        return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0, pv_line
 
     def quick_evaluate_with_mate(self, board: chess.Board, depth: int = 8) -> tuple[float, int | None]:
         """Fast low-depth evaluation returning (eval, mate_in)."""
         info = self.engine.analyse(board, chess.engine.Limit(depth=depth))
         score = info["score"].relative
         mate = score.mate() if score.is_mate() else None
-        return score.score(mate_score=10000) / 100.0, mate
+        return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0, mate
+
+    def evaluate_best_move(
+        self,
+        board: chess.Board,
+        depth: int | None = None,
+    ) -> tuple[chess.Move, float, list[chess.Move], int | None] | None:
+        """Return the unrestricted best root and its side-to-move evaluation."""
+        if board.is_game_over() or board.legal_moves.count() == 0:
+            return None
+        analysis_depth = depth if depth is not None else self.depth
+        info = self.engine.analyse(board, chess.engine.Limit(depth=analysis_depth))
+        pv_line = info.get("pv", [])
+        if not pv_line:
+            return None
+        score = info["score"].relative
+        mate = score.mate() if score.is_mate() else None
+        evaluation = score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
+        return pv_line[0], evaluation, pv_line, mate
+
+    def evaluate_root_moves(
+        self,
+        board: chess.Board,
+        root_moves: list[chess.Move] | tuple[chess.Move, ...],
+        depth: int | None = None,
+    ) -> dict[chess.Move, tuple[float, list[chess.Move], int | None]]:
+        """Evaluate an explicit set of legal roots from the current perspective."""
+        roots = list(dict.fromkeys(root_moves))
+        if not roots:
+            return {}
+        illegal = [move for move in roots if move not in board.legal_moves]
+        if illegal:
+            raise ValueError(f"Illegal root move for position: {illegal[0].uci()}")
+
+        analysis_depth = depth if depth is not None else self.depth
+        infos = self.engine.analyse(
+            board,
+            chess.engine.Limit(depth=analysis_depth),
+            multipv=len(roots),
+            root_moves=roots,
+        )
+        if isinstance(infos, dict):
+            infos = [infos]
+
+        results: dict[chess.Move, tuple[float, list[chess.Move], int | None]] = {}
+        for info in infos:
+            pv_line = info.get("pv", [])
+            if not pv_line:
+                continue
+            move = pv_line[0]
+            score = info["score"].relative
+            mate = score.mate() if score.is_mate() else None
+            evaluation = score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
+            results[move] = (evaluation, pv_line, mate)
+        return results
 
     def evaluate_all_moves(
         self,
@@ -96,7 +156,9 @@ class StockfishClient:
                 probe_evals: list[float] = []
                 for info in probe_infos:
                     if "pv" in info and info["pv"]:
-                        probe_evals.append(info["score"].relative.score(mate_score=10000) / 100.0)
+                        probe_evals.append(
+                            info["score"].relative.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
+                        )
                 if not probe_evals:
                     return {}, None
                 # Count how many probe moves fall within acceptable_drop + safety margin
@@ -120,8 +182,41 @@ class StockfishClient:
                 score = info["score"].relative
                 pv_line = info["pv"]
                 mate = score.mate() if score.is_mate() else None
-                results[move] = (score.score(mate_score=10000) / 100.0, pv_line, mate)
+                results[move] = (
+                    score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0,
+                    pv_line,
+                    mate,
+                )
         return results, best_probe_eval
+
+    def evaluate_move(
+        self,
+        board: chess.Board,
+        move: chess.Move,
+        depth: int | None = None,
+    ) -> tuple[float, list[chess.Move], int | None]:
+        """Evaluate one legal move from the current side-to-move perspective."""
+        if move not in board.legal_moves:
+            raise ValueError(f"Illegal move for position: {move.uci()}")
+
+        analysis_depth = depth if depth is not None else self.depth
+        board_after = board.copy()
+        board_after.push(move)
+
+        terminal_white = terminal_eval_white(board_after)
+        if terminal_white is not None:
+            eval_from_current_stm = terminal_white if board.turn == chess.WHITE else -terminal_white
+            mate = 1 if abs(terminal_white) == MATE_SCORE_PAWNS else None
+            return eval_from_current_stm, [move], mate
+
+        info = self.engine.analyse(board_after, chess.engine.Limit(depth=analysis_depth))
+        score = info["score"].relative
+        mate = score.mate() if score.is_mate() else None
+        # Engine score is from the opponent's perspective after the move.
+        # Negate it to express the move value from the original side to move.
+        eval_from_current_stm = -score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
+        pv_line = [move, *info.get("pv", [])]
+        return eval_from_current_stm, pv_line, -mate if mate is not None else None
 
     def evaluate_position(
         self,

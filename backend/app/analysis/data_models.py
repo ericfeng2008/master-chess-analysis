@@ -40,6 +40,10 @@ EPE_CUMULATIVE_CUTOFF = 0.95
 # the cumulative probability hasn't reached the cutoff yet.
 EPE_MAX_MOVES = 5
 
+# CTI evaluates the smallest Maia-probability prefix that reaches this target.
+# Any unevaluated tail becomes an explicit uncertainty interval.
+CTI_POLICY_COVERAGE = 0.995
+
 
 @dataclass
 class CTIResult:
@@ -52,15 +56,22 @@ class CTIResult:
     Attributes:
         cti: The CTI value in [0, 1], or None if the position was skipped.
             High values mean humans are unlikely to find a good move.
-        good_moves: Moves in set S (within acceptable_drop of best eval).
+        good_moves: Evaluated moves in set S (within acceptable_drop of best
+            eval). This list is not necessarily exhaustive while CTI is approximate.
         best_eval: Eval of the best move, from side-to-move perspective.
         best_mate: Mate-in-N from side-to-move perspective, or None if no forced mate.
         all_evals: Map of every evaluated move to its eval (side-to-move perspective).
         maia_policy: Maia probability distribution over all legal moves.
         best_pv: Principal variation (sequence of moves) for the best move.
+        cti_lower_bound/cti_upper_bound: Formal interval caused by unevaluated
+            Maia policy mass. Equal when the result is exact.
     """
 
     cti: float | None
+    cti_lower_bound: float
+    cti_upper_bound: float
+    cti_remaining_mass: float
+    cti_is_approximate: bool
     good_moves: list[chess.Move]
     best_eval: float
     best_mate: int | None
@@ -88,7 +99,8 @@ class AnalysisMoveData:
             Normalized to White's perspective. This is the value the UI displays.
         cti: Critical Tension Index for this position, or None if skipped.
         best_move: Stockfish's best move in SAN, or None if the position was skipped.
-        good_moves: List of moves in set S (within acceptable_drop of best), in SAN.
+        good_moves: Evaluated moves in set S (within acceptable_drop of best),
+            in SAN. May omit low-probability roots when CTI is approximate.
         good_moves_with_eval: Map of good moves (SAN) to their eval drop from best
             (negative or zero values; 0.0 = the best move itself).
         is_minefield: True if CTI exceeds the minefield_threshold.
@@ -123,6 +135,10 @@ class AnalysisMoveData:
     stockfish_eval: float
     eval_after: float
     cti: float | None
+    cti_lower_bound: float | None
+    cti_upper_bound: float | None
+    cti_remaining_mass: float | None
+    cti_is_approximate: bool
     best_move: str | None
     good_moves: list[str]
     good_moves_with_eval: dict[str, float]

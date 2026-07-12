@@ -24,6 +24,8 @@ interface ConfigurationPanelProps {
   movesAnalyzed: number;
   totalMoves: number;
   minefieldsFound: number;
+  analysisMaia3WhiteElo: number | null;
+  analysisMaia3BlackElo: number | null;
   error: string | null;
   handleAnalyze: () => void;
   hasPgn: boolean;
@@ -53,6 +55,8 @@ export function ConfigurationPanel({
   movesAnalyzed,
   totalMoves,
   minefieldsFound,
+  analysisMaia3WhiteElo,
+  analysisMaia3BlackElo,
   error,
   handleAnalyze,
   hasPgn,
@@ -64,6 +68,8 @@ export function ConfigurationPanel({
           <h3 className="section-title">Run Analysis</h3>
           <p className="status-line mt-1">
             {hasPgn ? "Ready" : "PGN required"} · Engine depth {engineDepth}
+            {analysisMaia3WhiteElo !== null && analysisMaia3BlackElo !== null &&
+              ` · Maia3 W ${analysisMaia3WhiteElo} / B ${analysisMaia3BlackElo}`}
             {!showConfig && " · Metric thresholds hidden"}
           </p>
         </div>

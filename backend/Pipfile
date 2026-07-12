@@ -1,5 +1,5 @@
 [requires]
-python_version = "3.14"
+python_version = "3.13"
 
 [packages]
 python-chess = ">=1.10"
@@ -7,5 +7,6 @@ fastapi = ">=0.110"
 uvicorn = ">=0.29"
 pydantic-settings = ">=2.2"
 python-multipart = ">=0.0.9"
+maia3 = {git = "https://github.com/CSSLab/maia3.git"}
 
 [dev-packages]

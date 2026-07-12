@@ -5,6 +5,14 @@ import { apiPostForm } from '../api/client';
 import type { PgnUploadResponse, ParsedMove, AnalyzeResult, PositionEvalResult } from '../types';
 import { bestLineFens } from '../utils/bestLineFens';
 
+type ExplorationMoveInput = {
+  san: string;
+  fen: string;
+  side: 'white' | 'black';
+  moveNumber: number;
+  evalResult: PositionEvalResult | null;
+};
+
 export interface AnalyzerHandlersDeps {
   ctiResult: AnalyzeResult | null;
   selectMove: (index: number) => void;
@@ -18,13 +26,15 @@ export interface AnalyzerHandlersDeps {
     mbiOutlierThreshold: number,
     eigThreshold: number,
     briThreshold: number,
+    maia3WhiteElo: number,
+    maia3BlackElo: number,
   ) => void;
   isExploring: boolean;
   currentExplorationIndex: number;
   exploredMoves: { san: string; fen: string }[];
   startNewExploration: (
     branchIndex: number,
-    initialMoves?: { san: string; fen: string; evalResult: PositionEvalResult | null }[],
+    initialMoves?: ExplorationMoveInput[],
   ) => void;
   addExploredMove: (
     san: string,
@@ -51,6 +61,8 @@ export interface AnalyzerHandlersDeps {
   mbiOutlierThreshold: number;
   eigThreshold: number;
   briThreshold: number;
+  maia3WhiteElo: number;
+  maia3BlackElo: number;
   setPgn: (v: string | null) => void;
   setUploadSummary: (v: PgnUploadResponse | null) => void;
   setUploadError: (v: string | null) => void;
@@ -104,6 +116,8 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     mbiOutlierThreshold,
     eigThreshold,
     briThreshold,
+    maia3WhiteElo,
+    maia3BlackElo,
     setPgn,
     setUploadSummary,
     setUploadError,
@@ -173,6 +187,8 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
       mbiOutlierThreshold,
       eigThreshold,
       briThreshold,
+      maia3WhiteElo,
+      maia3BlackElo,
     );
   }
 
@@ -218,14 +234,18 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
       const san = move.san;
 
       if (variationState != null && activeVariationMove && activeVariationFens) {
-        const prefixMoves: { san: string; fen: string; evalResult: PositionEvalResult | null }[] = [];
+        const prefixMoves: ExplorationMoveInput[] = [];
         for (let i = 0; i <= variationState.varIndex; i += 1) {
           const lineSan = activeVariationMove.best_line[i];
           const fen = activeVariationFens[i];
+          const preMoveFen = i === 0 ? activeVariationMove.fen : activeVariationFens[i - 1];
           if (lineSan && fen) {
+            const { side, moveNumber } = moveNotationFromPreFen(preMoveFen);
             prefixMoves.push({
               san: lineSan,
               fen,
+              side,
+              moveNumber,
               evalResult: normalizeEvalResult(activeVariationMove.best_line_evals?.[fen]),
             });
           }
@@ -338,6 +358,13 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     handleExplorationClick,
     handleChartSelectMoveWithExit,
   };
+}
+
+function moveNotationFromPreFen(fen: string): { side: 'white' | 'black'; moveNumber: number } {
+  const parts = fen.split(' ');
+  const side = parts[1] === 'b' ? 'black' : 'white';
+  const moveNumber = parseInt(parts[5] ?? '1', 10) || 1;
+  return { side, moveNumber };
 }
 
 export const useAnalyzerHandlers = useAnalyzerHandler;

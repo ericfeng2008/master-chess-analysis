@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.analysis.analyzer import analyze_game
 from app.analysis.data_models import AnalysisCompleteEvent, AnalysisProgressEvent
-from app.engines.maia_client import MaiaClient
+from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 from app.models.schemas import AnalyzeRequest, EvaluatePositionRequest, EvaluatePositionResponse, PgnUploadResponse
 from app.pgn_utils import normalize_pgn_for_python_chess
@@ -83,7 +83,7 @@ async def upload_pgn(file: UploadFile):
 @router.post("/api/analyze")
 async def analyze(request: AnalyzeRequest, req: Request):
     stockfish: StockfishClient = req.app.state.stockfish
-    maia: MaiaClient = req.app.state.maia
+    maia: Maia3Client = req.app.state.maia
     lock: threading.Lock = req.app.state.stockfish_lock
 
     def event_stream():
@@ -104,6 +104,8 @@ async def analyze(request: AnalyzeRequest, req: Request):
                     mbi_outlier_threshold=request.mbi_outlier_threshold,
                     eig_threshold=request.eig_threshold,
                     bri_threshold=request.bri_threshold,
+                    maia3_white_elo=request.maia3_white_elo,
+                    maia3_black_elo=request.maia3_black_elo,
                 ):
                     if isinstance(event, AnalysisProgressEvent):
                         data = json.dumps({
@@ -124,6 +126,10 @@ async def analyze(request: AnalyzeRequest, req: Request):
                                 "stockfish_eval": m.stockfish_eval,
                                 "eval_after": m.eval_after,
                                 "cti": m.cti,
+                                "cti_lower_bound": m.cti_lower_bound,
+                                "cti_upper_bound": m.cti_upper_bound,
+                                "cti_remaining_mass": m.cti_remaining_mass,
+                                "cti_is_approximate": m.cti_is_approximate,
                                 "best_move": m.best_move,
                                 "good_moves": m.good_moves,
                                 "good_moves_with_eval": m.good_moves_with_eval,

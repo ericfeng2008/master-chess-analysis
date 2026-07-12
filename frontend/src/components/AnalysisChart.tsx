@@ -22,6 +22,7 @@ type AnalysisMoveLike = {
   stockfish_eval: number;
   eval_after: number;
   cti: number | null;
+  cti_is_approximate?: boolean;
   best_move: string | null;
   good_moves: string[];
   good_moves_with_eval: Record<string, number>;
@@ -84,6 +85,7 @@ export function AnalysisChart({
       evalNegative: Math.min(0, transformed),
       ctiWhite: m.side === "white" ? m.cti : null,
       ctiBlack: m.side === "black" ? m.cti : null,
+      ctiApproximate: m.cti_is_approximate ?? false,
       epe: m.epe_score !== null ? evalTransform(m.epe_score) : null,
       mbi_classification: m.mbi_classification,
       mbi_maia_prob: m.mbi_maia_prob,

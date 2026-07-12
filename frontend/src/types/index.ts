@@ -22,6 +22,10 @@ export interface AnalysisMoveResult {
   stockfish_eval: number;
   eval_after: number;
   cti: number | null;
+  cti_lower_bound?: number | null;
+  cti_upper_bound?: number | null;
+  cti_remaining_mass?: number | null;
+  cti_is_approximate?: boolean;
   best_move: string | null;
   good_moves: string[];
   good_moves_with_eval: Record<string, number>;
@@ -41,6 +45,20 @@ export interface AnalysisMoveResult {
 export interface AnalyzeResult {
   moves: AnalysisMoveResult[];
   minefields: number[];
+}
+
+export interface AnalyzeRequest {
+  pgn: string;
+  acceptable_drop: number;
+  minefield_threshold: number;
+  engine_depth: number;
+  blunder_threshold: number;
+  mbi_trap_threshold: number;
+  mbi_outlier_threshold: number;
+  eig_threshold: number;
+  bri_threshold: number;
+  maia3_white_elo: number;
+  maia3_black_elo: number;
 }
 
 export interface AnalysisProgressEvent {
