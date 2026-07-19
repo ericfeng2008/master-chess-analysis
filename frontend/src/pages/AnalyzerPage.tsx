@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnalysisChart } from "../components/AnalysisChart";
 import { AnalysisChartLegend } from "../components/AnalysisChartLegend";
 import { AnalysisHistoryPanel } from "../components/AnalysisHistoryPanel";
@@ -10,9 +10,11 @@ import { MoveNavigator } from "../components/MoveNavigator";
 import { PgnViewer, type VariationData } from "../components/PgnViewer";
 import { PositionEvaluationBar } from "../components/PositionEvaluationBar";
 import { PositionInfoPanel } from "../components/PositionInfoPanel";
+import { PgnImportNotice } from "../components/PgnImportNotice";
 import { MistakeCapturePanel } from "../components/mistakes/MistakeCapturePanel";
 import { MistakeLibraryWorkspace } from "../components/mistakes/MistakeLibraryWorkspace";
 import { SavedGameLibraryOverlay } from "../components/SavedGameLibraryOverlay";
+import { DEFAULT_MAIA3_ELO, HISTORICAL_MAIA3_ELO } from "../constants/maia3";
 import { useAnalyzerHandlers } from "../hooks/useAnalyzerHandler";
 import { useAnalyzerKeyboard } from "../hooks/useAnalyzerKeyboard";
 import { useExploration } from "../hooks/useExploration";
@@ -25,6 +27,7 @@ import { resolveDisplayedPositionEvaluation } from "../utils/displayedPositionEv
 import { validateSavedGameSummaryResponse, validateStoredGameOpenResponse } from "../utils/storedGameValidation";
 import { parsePgnHeaders } from "../utils/pgnHeaders";
 import { parsePgnToMoves } from "../utils/pgnParser";
+import { formatDisplayedGameDetails } from "../utils/pgnImportSummary";
 import type { AnalysisHistoryEntry, PgnUploadResponse } from "../types";
 import type { GameMetadata, StoredGame, StoredGameMetadata, StoredGameSummary } from "../types/mistakes";
 
@@ -50,6 +53,7 @@ export function AnalyzerPage() {
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryEntry[]>([]);
   const [importPersistenceWarning, setImportPersistenceWarning] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<PgnUploadResponse | null>(null);
+  const [importNotice, setImportNotice] = useState<PgnUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -69,6 +73,8 @@ export function AnalyzerPage() {
   });
   const [applicationView, setApplicationView] = useState<ApplicationView>("analysis");
 
+  const expireImportNotice = useCallback(() => setImportNotice(null), []);
+
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [perspective, setPerspective] = useState<"white" | "black">("white");
 
@@ -82,8 +88,8 @@ export function AnalyzerPage() {
   const [mbiOutlierThreshold, setMbiOutlierThreshold] = useState(0.05);
   const [eigThreshold, setEigThreshold] = useState(2.0);
   const [briThreshold, setBriThreshold] = useState(0.05);
-  const [maia3WhiteElo, setMaia3WhiteElo] = useState(2200);
-  const [maia3BlackElo, setMaia3BlackElo] = useState(2200);
+  const [maia3WhiteElo, setMaia3WhiteElo] = useState(DEFAULT_MAIA3_ELO);
+  const [maia3BlackElo, setMaia3BlackElo] = useState(DEFAULT_MAIA3_ELO);
 
   const restoreStoredAnalysis = (game: StoredGame, selectedPly = 0) => {
     setAcceptableDrop(storedNumber(game.request.acceptable_drop, 0.5));
@@ -94,8 +100,8 @@ export function AnalyzerPage() {
     setMbiOutlierThreshold(storedNumber(game.request.mbi_outlier_threshold, 0.05));
     setEigThreshold(storedNumber(game.request.eig_threshold, 2));
     setBriThreshold(storedNumber(game.request.bri_threshold, 0.05));
-    setMaia3WhiteElo(storedNumber(game.request.maia3_white_elo, 2200));
-    setMaia3BlackElo(storedNumber(game.request.maia3_black_elo, 2200));
+    setMaia3WhiteElo(storedNumber(game.request.maia3_white_elo, HISTORICAL_MAIA3_ELO));
+    setMaia3BlackElo(storedNumber(game.request.maia3_black_elo, HISTORICAL_MAIA3_ELO));
     setGameId(game.game_id);
     setShowConfig(false);
     cti.restoreAnalysis(game, selectedPly);
@@ -190,6 +196,7 @@ export function AnalyzerPage() {
     clearAnalysis: cti.clearAnalysis,
     restoreImportedAnalysis: restoreStoredAnalysis,
     setUploadSummary,
+    setImportNotice,
     setUploadError,
     setUploading,
     setUploadedFileName,
@@ -199,6 +206,12 @@ export function AnalyzerPage() {
     onImportedGame: (result) => {
       exploration.clearExplorations();
       setVariationState(null);
+      if (!result.preferred_analysis_run_id) {
+        setMaia3WhiteElo(DEFAULT_MAIA3_ELO);
+        setMaia3BlackElo(DEFAULT_MAIA3_ELO);
+        setShowConfig(true);
+      }
+      if (result.num_games_saved > 0) setLibraryRefresh(value => value + 1);
       if (!result.game_id) { setActiveMetadata(null); return; }
       const metadata: ActiveMetadata = { id: result.game_id, metadata: result.metadata ?? {}, metadata_sources: (result.metadata_sources ?? { Event: 'missing', White: 'missing', Black: 'missing' }) as ActiveMetadata['metadata_sources'], metadata_missing: (result.metadata_missing ?? ['Event', 'White', 'Black']) as ActiveMetadata['metadata_missing'], metadata_updated_at: result.metadata_updated_at ?? null, source_headers: result.source_headers ?? {}, imported_metadata: result.imported_metadata ?? {}, metadata_overrides: result.metadata_overrides ?? {} };
       setActiveMetadata(metadata);
@@ -239,13 +252,19 @@ export function AnalyzerPage() {
       setGameId(game.id);
       setAnalysisHistory(game.analysis_history);
       setImportPersistenceWarning(null);
+      setImportNotice(null);
       setUploadError(null);
       setUploadedFileName(`${game.metadata.White ?? 'White'} — ${game.metadata.Black ?? 'Black'} · stored locally`);
-      setUploadSummary({ pgn: game.normalized_pgn, num_games: 1, num_variations: 0, max_depth: game.move_count, game_id: game.id, fingerprint_version: game.fingerprint_version, game_fingerprint: game.game_fingerprint, preferred_analysis_run_id: game.preferred_analysis_run_id, analysis_history: game.analysis_history, persistence_warning: null, metadata: game.metadata, metadata_sources: game.metadata_sources, metadata_missing: game.metadata_missing, metadata_updated_at: game.metadata_updated_at, source_headers: game.source_headers, imported_metadata: game.imported_metadata, metadata_overrides: game.metadata_overrides });
+      setUploadSummary({ pgn: game.normalized_pgn, num_games: 1, num_unique_games: 1, num_games_added: 0, num_games_existing: 1, num_duplicate_games: 0, num_games_saved: 1, num_variations: 0, max_depth: game.move_count, game_id: game.id, fingerprint_version: game.fingerprint_version, game_fingerprint: game.game_fingerprint, preferred_analysis_run_id: game.preferred_analysis_run_id, analysis_history: game.analysis_history, persistence_warning: null, metadata: game.metadata, metadata_sources: game.metadata_sources, metadata_missing: game.metadata_missing, metadata_updated_at: game.metadata_updated_at, source_headers: game.source_headers, imported_metadata: game.imported_metadata, metadata_overrides: game.metadata_overrides });
       setActiveMetadata(metadataFromGame(game));
       setLibraryRefresh(value => value + 1);
       if (game.analysis) restoreStoredAnalysis(game.analysis);
-      else { cti.clearAnalysis(); setShowConfig(true); }
+      else {
+        cti.clearAnalysis();
+        setMaia3WhiteElo(DEFAULT_MAIA3_ELO);
+        setMaia3BlackElo(DEFAULT_MAIA3_ELO);
+        setShowConfig(true);
+      }
       setSavedLibraryOpen(false);
       if (game.metadata_missing.length) setMetadataEditorGame(metadataFromGame(game));
       else setMetadataEditorGame(null);
@@ -325,10 +344,16 @@ export function AnalyzerPage() {
     const openStoredGame = (game: StoredGame, ply: number) => {
       const side = game.result.moves[ply]?.side === "black" ? "black" : "white";
       setPgn(game.normalized_pgn);
+      setImportNotice(null);
       setUploadedFileName(`${game.headers.White ?? "White"} — ${game.headers.Black ?? "Black"} · stored locally`);
       setUploadSummary({
         pgn: game.normalized_pgn,
         num_games: 1,
+        num_unique_games: 1,
+        num_games_added: 0,
+        num_games_existing: 1,
+        num_duplicate_games: 0,
+        num_games_saved: 1,
         num_variations: 0,
         max_depth: game.result.moves.length,
         game_id: game.game_id,
@@ -464,10 +489,10 @@ export function AnalyzerPage() {
               {uploadError && <p className="status-line status-error mt-3">{uploadError}</p>}
               {uploadSummary && (
                 <p className="status-line mt-3">
-                  {uploadSummary.num_games} game{uploadSummary.num_games !== 1 && "s"},{" "}
-                  {uploadSummary.num_variations} variation{uploadSummary.num_variations !== 1 && "s"}, max depth {uploadSummary.max_depth}
+                  {formatDisplayedGameDetails(uploadSummary)}
                 </p>
               )}
+              <PgnImportNotice summary={importNotice} onExpire={expireImportNotice} />
             </div>
           </aside>
 

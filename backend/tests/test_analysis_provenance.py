@@ -9,6 +9,7 @@ from app.persistence.provenance import (
     game_fingerprint,
     mistake_fingerprint,
     normalized_mainline_pgn,
+    parse_pgn_games,
     parse_single_game_pgn,
     pgn_fingerprint,
     provenance_fingerprint,
@@ -105,6 +106,50 @@ def test_parser_rejects_empty_mainline_and_multiple_games():
         parse_single_game_pgn('[Event "Empty"]\n\n*')
     with pytest.raises(PgnValidationError, match="one game"):
         parse_single_game_pgn(PGN_A + "\n\n" + PGN_B)
+
+
+def test_multi_game_parser_preserves_order_and_per_game_context():
+    custom = (
+        '[Event "Custom"]\n[SetUp "1"]\n'
+        '[FEN "8/8/8/8/8/8/4K3/6k1 w - - 0 1"]\n\n1. Kf3 *'
+    )
+    games = parse_pgn_games(
+        PGN_A + '\n\n' +
+        '[Event "Decorated"]\n\n1. d4 {main} d5 (1... Nf6) 2. c4 *' +
+        '\n\n' + custom
+    )
+
+    assert [game.headers["Event"] for game in games] == ["A", "Decorated", "Custom"]
+    assert games[0].mainline_uci == ("e2e4", "e7e5")
+    assert games[1].num_variations == 1 and games[1].max_depth == 3
+    assert games[2].initial_fen.startswith("8/8/8/8")
+
+
+def test_multi_game_parser_keeps_duplicate_entries_for_batch_accounting():
+    games = parse_pgn_games(PGN_A + "\n\n" + PGN_A + "\n\n" + PGN_B)
+    assert len(games) == 3
+    assert game_fingerprint(games[0]) == game_fingerprint(games[1])
+    assert game_fingerprint(games[0]) != game_fingerprint(games[2])
+
+
+def test_multi_game_parser_identifies_an_invalid_later_game():
+    with pytest.raises(PgnValidationError, match=r"Game 2:.*at least one"):
+        parse_pgn_games(PGN_A + '\n\n[Event "Empty"]\n\n*')
+
+
+def test_strict_snapshot_and_fingerprint_callers_reject_multiple_games():
+    multiple = PGN_A + "\n\n" + PGN_B
+    with pytest.raises(PgnValidationError, match="one game"):
+        build_analysis_snapshot(
+            multiple,
+            request={"engine_depth": 12},
+            engine={"name": "Stockfish"},
+            maia={"model": "maia3-79m"},
+            moves=[],
+            minefields=[],
+        )
+    with pytest.raises(PgnValidationError, match="one game"):
+        pgn_fingerprint(multiple)
 
 
 def test_analysis_fingerprint_ignores_incidental_fields_but_covers_inputs():

@@ -15,7 +15,7 @@ from app.persistence.database import (
     MIGRATION_5,
     SCHEMA_VERSION,
 )
-from app.persistence.provenance import build_analysis_snapshot
+from app.persistence.provenance import build_analysis_snapshot, parse_pgn_games
 
 
 PGN = '[Event "Original"]\n[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 *'
@@ -23,6 +23,7 @@ DECORATED_PGN = (
     '[Event "Updated"]\n[White "Renamed"]\n[Black "B"]\n\n'
     '1. e4! {central [%clk 0:10:00]} e5 (1... c5) 2. Nf3 1-0'
 )
+OTHER_PGN = '[Event "Other"]\n[White "C"]\n[Black "D"]\n\n1. d4 d5 2. c4 *'
 
 
 def snapshot(pgn: str = PGN, depth: int = 12):
@@ -84,6 +85,70 @@ def test_game_upsert_history_cache_and_grouped_listing(tmp_path):
     assert listing["total"] == 1
     assert listing["items"][0]["analysis_count"] == 2
     assert listing["items"][0]["preferred_analysis_run_id"] == run_18
+
+
+def test_batch_upsert_persists_unique_games_without_analysis_rows(tmp_path):
+    database = Database(tmp_path / "analysis.db")
+    database.initialize()
+    analyses = AnalysisRepository(database)
+
+    report = analyses.upsert_games(
+        parse_pgn_games(PGN + "\n\n" + OTHER_PGN + "\n\n" + DECORATED_PGN)
+    )
+
+    assert report["num_games"] == 3
+    assert report["num_unique_games"] == report["num_games_added"] == 2
+    assert report["num_games_existing"] == 0
+    assert report["num_duplicate_games"] == 1
+    assert report["num_games_saved"] == 2
+    assert [game["headers"]["Event"] for game in report["games"]] == ["Original", "Other"]
+    with database.connect() as connection:
+        assert connection.execute("SELECT count(*) FROM games").fetchone()[0] == 2
+        assert connection.execute("SELECT count(*) FROM analysis_runs").fetchone()[0] == 0
+
+
+def test_batch_upsert_preserves_existing_history_overrides_and_trailing_recency(tmp_path):
+    database = Database(tmp_path / "analysis.db")
+    database.initialize()
+    analyses = AnalysisRepository(database)
+    trailing = analyses.upsert_game(OTHER_PGN)
+    analyses.update_metadata(trailing["id"], {"Event": "Manual Event"})
+    run_id = analyses.create_analysis_run(snapshot(OTHER_PGN, 12))
+    before = analyses.get_game(trailing["id"])
+
+    report = analyses.upsert_games(parse_pgn_games(PGN + "\n\n" + OTHER_PGN))
+    after = analyses.get_game(trailing["id"])
+
+    assert report["num_games_added"] == 1 and report["num_games_existing"] == 1
+    assert report["games"][1]["id"] == trailing["id"]
+    assert after["metadata"]["Event"] == "Manual Event"
+    assert after["last_opened_at"] == before["last_opened_at"]
+    assert analyses.analysis_history(trailing["id"])[0]["id"] == run_id
+
+
+def test_batch_upsert_rolls_back_every_game_when_a_later_write_fails(tmp_path, monkeypatch):
+    database = Database(tmp_path / "analysis.db")
+    database.initialize()
+    analyses = AnalysisRepository(database)
+    original = analyses._upsert_game_in_transaction
+    calls = 0
+
+    def fail_second(connection, parsed, *, mark_opened, now):
+        nonlocal calls
+        calls += 1
+        result = original(
+            connection, parsed, mark_opened=mark_opened, now=now
+        )
+        if calls == 2:
+            raise RuntimeError("injected batch failure")
+        return result
+
+    monkeypatch.setattr(analyses, "_upsert_game_in_transaction", fail_second)
+    with pytest.raises(RuntimeError, match="injected batch failure"):
+        analyses.upsert_games(parse_pgn_games(PGN + "\n\n" + OTHER_PGN))
+
+    with database.connect() as connection:
+        assert connection.execute("SELECT count(*) FROM games").fetchone()[0] == 0
 
 
 def test_import_and_completed_analysis_survive_repository_restart(tmp_path):

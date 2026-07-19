@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AnalyzeResult, AnalysisMoveResult, PositionEvalResult } from "../types";
+import type { AnalyzeResult, AnalysisMoveResult, PgnUploadResponse, PositionEvalResult } from "../types";
+import type { LogicalStoredGame, StoredGame, StoredGameSummary } from "../types/mistakes";
 import { bestLineFens } from "../utils/bestLineFens";
 import { AnalyzerPage } from "./AnalyzerPage";
 
@@ -19,6 +20,7 @@ interface HarnessGameState {
   analysisMaia3BlackElo: number | null;
   startAnalysis: () => void;
   cancelAnalysis: () => void;
+  clearAnalysis: () => void;
   selectMove: (index: number) => void;
   restoreAnalysis: () => void;
 }
@@ -42,6 +44,7 @@ interface HarnessExplorationState {
   navigateExploration: () => void;
   exitExploration: () => void;
   enterSavedExploration: () => void;
+  clearExplorations: () => void;
 }
 
 interface TestHarness {
@@ -50,6 +53,9 @@ interface TestHarness {
   varEvalCache: Map<string, PositionEvalResult>;
   varEvalLoading: string | null;
   setVariationState: ((state: VariationState) => void) | null;
+  onImportedGame: ((result: PgnUploadResponse) => void) | null;
+  activateImportedGame: ((result: PgnUploadResponse) => void) | null;
+  onOpenSavedGame: ((game: StoredGameSummary) => void) | null;
 }
 
 const harness = vi.hoisted(() => ({
@@ -58,7 +64,22 @@ const harness = vi.hoisted(() => ({
   varEvalCache: new Map(),
   varEvalLoading: null,
   setVariationState: null,
+  onImportedGame: null,
+  activateImportedGame: null,
+  onOpenSavedGame: null,
 })) as unknown as TestHarness;
+
+const pageApi = vi.hoisted(() => ({
+  getAnalysisRun: vi.fn(),
+  getLogicalGame: vi.fn(),
+  openStoredGame: vi.fn(),
+}));
+
+vi.mock("../api/mistakes", () => ({
+  getAnalysisRun: (...args: unknown[]) => pageApi.getAnalysisRun(...args),
+  getLogicalGame: (...args: unknown[]) => pageApi.getLogicalGame(...args),
+  openStoredGame: (...args: unknown[]) => pageApi.openStoredGame(...args),
+}));
 
 vi.mock("../hooks/useGameAnalysis", () => ({
   useGameAnalysis: () => harness.game,
@@ -83,8 +104,17 @@ vi.mock("../hooks/useMoveNavigation", () => ({
 }));
 
 vi.mock("../hooks/useAnalyzerHandler", () => ({
-  useAnalyzerHandlers: (deps: { setVariationState: (state: VariationState) => void }) => {
+  useAnalyzerHandlers: (deps: {
+    setPgn: (pgn: string) => void;
+    setVariationState: (state: VariationState) => void;
+    onImportedGame: (result: PgnUploadResponse) => void;
+  }) => {
     harness.setVariationState = deps.setVariationState;
+    harness.onImportedGame = deps.onImportedGame;
+    harness.activateImportedGame = (result) => {
+      deps.setPgn(result.pgn);
+      deps.onImportedGame(result);
+    };
     return {
       handleBoardMove: vi.fn(() => false),
       handleChartSelectMoveWithExit: vi.fn(),
@@ -116,7 +146,26 @@ vi.mock("../components/ChessBoard", () => ({
   ),
 }));
 vi.mock("../components/ConfigurationPanel", () => ({ ConfigurationPanel: () => null }));
-vi.mock("../components/GameInfoPanel", () => ({ GameInfoPanel: () => null }));
+vi.mock("../components/GameInfoPanel", () => ({
+  GameInfoPanel: ({
+    maia3WhiteElo,
+    setMaia3WhiteElo,
+    maia3BlackElo,
+    setMaia3BlackElo,
+  }: {
+    maia3WhiteElo: number;
+    setMaia3WhiteElo: (value: number) => void;
+    maia3BlackElo: number;
+    setMaia3BlackElo: (value: number) => void;
+  }) => (
+    <div>
+      <output data-testid="white-maia3-elo">{maia3WhiteElo}</output>
+      <output data-testid="black-maia3-elo">{maia3BlackElo}</output>
+      <button type="button" onClick={() => setMaia3WhiteElo(2000)}>Set White 2000</button>
+      <button type="button" onClick={() => setMaia3BlackElo(2400)}>Set Black 2400</button>
+    </div>
+  ),
+}));
 vi.mock("../components/MoveNavigator", () => ({
   MoveNavigator: ({ onFlip }: { onFlip: () => void }) => (
     <button type="button" onClick={onFlip}>Flip board</button>
@@ -124,6 +173,18 @@ vi.mock("../components/MoveNavigator", () => ({
 }));
 vi.mock("../components/PgnViewer", () => ({ PgnViewer: () => null }));
 vi.mock("../components/PositionInfoPanel", () => ({ PositionInfoPanel: () => null }));
+vi.mock("../components/SavedGameLibraryOverlay", () => ({
+  SavedGameLibraryOverlay: ({
+    refreshToken,
+    onOpenGame,
+  }: {
+    refreshToken: number;
+    onOpenGame: (game: StoredGameSummary) => void;
+  }) => {
+    harness.onOpenSavedGame = onOpenGame;
+    return <output data-testid="library-refresh-token">{refreshToken}</output>;
+  },
+}));
 vi.mock("../components/mistakes/MistakeCapturePanel", () => ({ MistakeCapturePanel: () => null }));
 vi.mock("../components/mistakes/MistakeLibraryWorkspace", () => ({
   MistakeLibraryWorkspace: () => <div data-testid="mistake-library-secondary-board">Secondary chessboard</div>,
@@ -150,7 +211,90 @@ describe("AnalyzerPage evaluation bar integration", () => {
     harness.varEvalCache = new Map();
     harness.varEvalLoading = null;
     harness.setVariationState = null;
+    harness.onImportedGame = null;
+    harness.activateImportedGame = null;
+    harness.onOpenSavedGame = null;
+    vi.clearAllMocks();
     window.localStorage.clear();
+  });
+
+  it("uses 2600/2600 for a newly imported first game instead of carrying prior selections", () => {
+    render(<AnalyzerPage />);
+    act(() => harness.activateImportedGame?.(importedGameResponse()));
+    expect(screen.getByTestId("white-maia3-elo")).toHaveTextContent("2600");
+    expect(screen.getByTestId("black-maia3-elo")).toHaveTextContent("2600");
+
+    fireEvent.click(screen.getByRole("button", { name: "Set White 2000" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set Black 2400" }));
+    expect(screen.getByTestId("white-maia3-elo")).toHaveTextContent("2000");
+    expect(screen.getByTestId("black-maia3-elo")).toHaveTextContent("2400");
+
+    act(() => harness.activateImportedGame?.({ ...importedGameResponse(), game_id: "game-2" }));
+    expect(screen.getByTestId("white-maia3-elo")).toHaveTextContent("2600");
+    expect(screen.getByTestId("black-maia3-elo")).toHaveTextContent("2600");
+  });
+
+  it("uses 2600/2600 when an unanalyzed trailing import is opened from the library", async () => {
+    pageApi.openStoredGame.mockResolvedValue(logicalGame(null));
+    render(<AnalyzerPage />);
+    act(() => harness.activateImportedGame?.(importedGameResponse()));
+    fireEvent.click(screen.getByRole("button", { name: "Set White 2000" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set Black 2400" }));
+
+    act(() => harness.onOpenSavedGame?.(storedGameSummary(0)));
+    await waitFor(() => {
+      expect(screen.getByTestId("white-maia3-elo")).toHaveTextContent("2600");
+      expect(screen.getByTestId("black-maia3-elo")).toHaveTextContent("2600");
+    });
+  });
+
+  it("preserves explicit Maia3 ratings when a saved analysis is opened", async () => {
+    pageApi.openStoredGame.mockResolvedValue(logicalGame(storedAnalysis(2200, 2400)));
+    render(<AnalyzerPage />);
+
+    act(() => harness.onOpenSavedGame?.(storedGameSummary(1)));
+    await waitFor(() => {
+      expect(screen.getByTestId("white-maia3-elo")).toHaveTextContent("2200");
+      expect(screen.getByTestId("black-maia3-elo")).toHaveTextContent("2400");
+    });
+  });
+
+  it("refreshes the saved-game library once per persisted import batch", () => {
+    render(<AnalyzerPage />);
+    expect(screen.getByTestId("library-refresh-token")).toHaveTextContent("0");
+
+    const imported: PgnUploadResponse = {
+      pgn: '[Event "Batch"]\n\n1. e4 *',
+      num_games: 4,
+      num_unique_games: 3,
+      num_games_added: 2,
+      num_games_existing: 1,
+      num_duplicate_games: 1,
+      num_games_saved: 3,
+      num_variations: 0,
+      max_depth: 1,
+      game_id: "game-1",
+      fingerprint_version: 1,
+      game_fingerprint: "fingerprint-1",
+      preferred_analysis_run_id: null,
+      analysis_history: [],
+      persistence_warning: null,
+      metadata: { Event: "Batch", White: "White", Black: "Black" },
+      metadata_sources: { Event: "imported", White: "imported", Black: "imported" },
+      metadata_missing: [],
+    };
+    act(() => harness.onImportedGame?.(imported));
+    expect(screen.getByTestId("library-refresh-token")).toHaveTextContent("1");
+
+    act(() => harness.onImportedGame?.({
+      ...imported,
+      game_id: null,
+      num_games_added: 0,
+      num_games_existing: 0,
+      num_games_saved: 0,
+      persistence_warning: "Database unavailable",
+    }));
+    expect(screen.getByTestId("library-refresh-token")).toHaveTextContent("1");
   });
 
   it("stays hidden before and during analysis, appears for completed/restored data, and is absent in the Mistake Library", () => {
@@ -260,6 +404,108 @@ describe("AnalyzerPage evaluation bar integration", () => {
   });
 });
 
+function importedGameResponse(): PgnUploadResponse {
+  return {
+    pgn: '[Event "Batch"]\n\n1. e4 *',
+    num_games: 3,
+    num_unique_games: 3,
+    num_games_added: 3,
+    num_games_existing: 0,
+    num_duplicate_games: 0,
+    num_games_saved: 3,
+    num_variations: 0,
+    max_depth: 1,
+    game_id: "game-1",
+    fingerprint_version: 1,
+    game_fingerprint: "fingerprint-1",
+    preferred_analysis_run_id: null,
+    analysis_history: [],
+    persistence_warning: null,
+    metadata: { Event: "Batch", White: "White", Black: "Black" },
+    metadata_sources: { Event: "imported", White: "imported", Black: "imported" },
+    metadata_missing: [],
+  };
+}
+
+function storedGameSummary(analysisCount: number): StoredGameSummary {
+  return {
+    id: "game-1",
+    headers: { Event: "Batch", White: "White", Black: "Black" },
+    metadata: { Event: "Batch", White: "White", Black: "Black" },
+    metadata_sources: { Event: "imported", White: "imported", Black: "imported" },
+    metadata_missing: [],
+    metadata_updated_at: "2026-07-19T12:00:00Z",
+    source_headers: { Event: "Batch", White: "White", Black: "Black" },
+    imported_metadata: { Event: "Batch", White: "White", Black: "Black" },
+    metadata_overrides: {},
+    created_at: "2026-07-19T12:00:00Z",
+    updated_at: "2026-07-19T12:00:00Z",
+    mistake_count: 0,
+    move_count: 1,
+    analysis_count: analysisCount,
+    preferred_analysis_run_id: analysisCount ? "run-1" : null,
+    last_opened_at: "2026-07-19T12:00:00Z",
+    result: "*",
+  };
+}
+
+function storedAnalysis(whiteElo: number, blackElo: number): StoredGame {
+  return {
+    id: "run-1",
+    game_id: "game-1",
+    analysis_fingerprint: "analysis-1",
+    cacheable: true,
+    normalized_pgn: '[Event "Batch"]\n\n1. e4 *',
+    headers: { Event: "Batch", White: "White", Black: "Black" },
+    request: {
+      pgn: '[Event "Batch"]\n\n1. e4 *',
+      game_id: "game-1",
+      acceptable_drop: 0.5,
+      minefield_threshold: 0.8,
+      engine_depth: 12,
+      blunder_threshold: 1,
+      mbi_trap_threshold: 0.4,
+      mbi_outlier_threshold: 0.05,
+      eig_threshold: 2,
+      bri_threshold: 0.05,
+      maia3_white_elo: whiteElo,
+      maia3_black_elo: blackElo,
+    },
+    engine: {},
+    maia: {},
+    metric_schema_version: 2,
+    result: makeResult(),
+    created_at: "2026-07-19T12:00:00Z",
+    updated_at: "2026-07-19T12:00:00Z",
+  };
+}
+
+function logicalGame(analysis: StoredGame | null): LogicalStoredGame {
+  return {
+    id: "game-1",
+    fingerprint_version: 1,
+    game_fingerprint: "fingerprint-1",
+    canonical_initial_fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    mainline_uci: ["e2e4"],
+    normalized_pgn: '[Event "Batch"]\n\n1. e4 *',
+    headers: { Event: "Batch", White: "White", Black: "Black" },
+    move_count: 1,
+    created_at: "2026-07-19T12:00:00Z",
+    updated_at: "2026-07-19T12:00:00Z",
+    last_opened_at: "2026-07-19T12:00:00Z",
+    analysis_history: [],
+    preferred_analysis_run_id: analysis?.id ?? null,
+    analysis,
+    metadata: { Event: "Batch", White: "White", Black: "Black" },
+    metadata_sources: { Event: "imported", White: "imported", Black: "imported" },
+    metadata_missing: [],
+    metadata_updated_at: "2026-07-19T12:00:00Z",
+    source_headers: { Event: "Batch", White: "White", Black: "Black" },
+    imported_metadata: { Event: "Batch", White: "White", Black: "Black" },
+    metadata_overrides: {},
+  };
+}
+
 function makeGameState(result: AnalyzeResult | null): HarnessGameState {
   return {
     isAnalyzing: false,
@@ -273,6 +519,7 @@ function makeGameState(result: AnalyzeResult | null): HarnessGameState {
     analysisMaia3BlackElo: null,
     startAnalysis: vi.fn(),
     cancelAnalysis: vi.fn(),
+    clearAnalysis: vi.fn(),
     selectMove: vi.fn((index: number) => {
       harness.game.selectedMoveIndex = index;
     }),
@@ -296,6 +543,7 @@ function makeExplorationState(
     navigateExploration: vi.fn(),
     exitExploration: vi.fn(),
     enterSavedExploration: vi.fn(),
+    clearExplorations: vi.fn(),
     ...overrides,
   };
 }

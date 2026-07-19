@@ -61,30 +61,11 @@ def _variation_summary(root: chess.pgn.GameNode) -> tuple[int, int]:
     return variations, max_depth
 
 
-def parse_single_game_pgn(pgn_text: str) -> ParsedPgn:
-    """Parse exactly one non-empty standard-chess game and derive replay context."""
-
-    source = normalize_pgn_for_python_chess(pgn_text).strip()
-    if not source:
-        raise PgnValidationError("Uploaded file is empty")
-
-    stream = io.StringIO(source)
-    try:
-        game = chess.pgn.read_game(stream)
-    except (ValueError, IndexError) as exc:
-        raise PgnValidationError(f"PGN could not be parsed: {exc}") from exc
-    if game is None:
-        raise PgnValidationError("File contains no valid PGN game")
+def _parse_game(game: chess.pgn.Game, game_number: int) -> ParsedPgn:
     if game.errors:
-        raise PgnValidationError(f"PGN contains an invalid move: {game.errors[0]}")
-
-    try:
-        second_game = chess.pgn.read_game(stream)
-    except (ValueError, IndexError) as exc:
-        raise PgnValidationError(f"Additional PGN content is invalid: {exc}") from exc
-    if second_game is not None:
-        raise PgnValidationError("This workflow accepts one game per PGN file")
-
+        raise PgnValidationError(
+            f"Game {game_number}: PGN contains an invalid move: {game.errors[0]}"
+        )
     board = game.board()
     initial_fen = _canonical_fen(board)
     mainline_uci: list[str] = []
@@ -95,7 +76,8 @@ def parse_single_game_pgn(pgn_text: str) -> ParsedPgn:
         move = child.move
         if move not in board.legal_moves:
             raise PgnValidationError(
-                f"PGN mainline contains an illegal move at ply {len(mainline_uci)}"
+                f"Game {game_number}: PGN mainline contains an illegal move "
+                f"at ply {len(mainline_uci)}"
             )
         clock = None
         match = re.search(r"\[%clk\s+([^\]]+)\]", child.comment or "")
@@ -114,7 +96,9 @@ def parse_single_game_pgn(pgn_text: str) -> ParsedPgn:
         node = child
 
     if not mainline_uci:
-        raise PgnValidationError("PGN game must contain at least one mainline move")
+        raise PgnValidationError(
+            f"Game {game_number}: PGN game must contain at least one mainline move"
+        )
 
     exporter = chess.pgn.StringExporter(headers=True, variations=True, comments=True)
     normalized_pgn = game.accept(exporter).strip()
@@ -128,6 +112,41 @@ def parse_single_game_pgn(pgn_text: str) -> ParsedPgn:
         num_variations=variations,
         max_depth=max_depth,
     )
+
+
+def parse_pgn_games(pgn_text: str) -> list[ParsedPgn]:
+    """Parse every non-empty standard-chess game in source order."""
+
+    source = normalize_pgn_for_python_chess(pgn_text).strip()
+    if not source:
+        raise PgnValidationError("Uploaded file is empty")
+
+    stream = io.StringIO(source)
+    parsed_games: list[ParsedPgn] = []
+    while True:
+        game_number = len(parsed_games) + 1
+        try:
+            game = chess.pgn.read_game(stream)
+        except (ValueError, IndexError) as exc:
+            raise PgnValidationError(
+                f"Game {game_number}: PGN could not be parsed: {exc}"
+            ) from exc
+        if game is None:
+            break
+        parsed_games.append(_parse_game(game, game_number))
+
+    if not parsed_games:
+        raise PgnValidationError("File contains no valid PGN game")
+    return parsed_games
+
+
+def parse_single_game_pgn(pgn_text: str) -> ParsedPgn:
+    """Parse exactly one non-empty standard-chess game and derive replay context."""
+
+    parsed_games = parse_pgn_games(pgn_text)
+    if len(parsed_games) != 1:
+        raise PgnValidationError("This workflow accepts one game per PGN file")
+    return parsed_games[0]
 
 
 def normalized_mainline_pgn(pgn_text: str) -> str:

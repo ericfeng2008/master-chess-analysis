@@ -83,17 +83,83 @@ def complete_event(response) -> dict:
     return json.loads(chunks[-1][6:])
 
 
-def test_upload_persists_reuses_and_rejects_multiple_games(tmp_path):
-    app, _repository = make_app(tmp_path)
+def test_upload_persists_reuses_and_accepts_multiple_games(tmp_path):
+    app, repository = make_app(tmp_path)
     client = TestClient(app)
-    first = upload(client)
-    repeated = upload(client, DECORATED)
-    assert first.status_code == 200
-    assert first.json()["game_id"] == repeated.json()["game_id"]
-    assert first.json()["preferred_analysis_run_id"] is None
-    multiple = upload(client, PGN + "\n\n" + OTHER)
-    assert multiple.status_code == 400
-    assert "one game" in multiple.json()["detail"]
+    multiple = upload(client, PGN + "\n\n" + OTHER + "\n\n" + DECORATED)
+    assert multiple.status_code == 200
+    imported = multiple.json()
+    assert imported["pgn"].startswith('[Event "API"]')
+    assert imported["metadata"]["Event"] == "API"
+    assert imported["num_variations"] == 0 and imported["max_depth"] == 3
+    assert imported["num_games"] == 3
+    assert imported["num_unique_games"] == imported["num_games_saved"] == 2
+    assert imported["num_games_added"] == 2
+    assert imported["num_games_existing"] == 0
+    assert imported["num_duplicate_games"] == 1
+    assert imported["preferred_analysis_run_id"] is None
+    assert app.state.stockfish_lock.entries == 0
+    assert repository.analysis_history(imported["game_id"]) == []
+
+    listing = client.get("/api/stored-games?analysis_state=not_analyzed").json()
+    assert listing["total"] == 2
+    assert {item["metadata"]["Event"] for item in listing["items"]} == {"API", "Other"}
+
+    repeated = upload(client, PGN + "\n\n" + OTHER + "\n\n" + DECORATED).json()
+    assert repeated["game_id"] == imported["game_id"]
+    assert repeated["num_games_added"] == 0
+    assert repeated["num_games_existing"] == 2
+    assert repeated["num_duplicate_games"] == 1
+
+
+def test_upload_rejects_an_invalid_later_game_without_partial_persistence(tmp_path):
+    app, repository = make_app(tmp_path)
+    client = TestClient(app)
+
+    response = upload(client, PGN + '\n\n[Event "Empty"]\n\n*')
+
+    assert response.status_code == 400
+    assert "Game 2" in response.json()["detail"]
+    assert repository.find_game_by_fingerprint("missing") is None
+    assert client.get("/api/stored-games").json()["total"] == 0
+
+
+def test_upload_restores_first_game_history_without_analyzing_trailing_games(tmp_path):
+    app, repository = make_app(tmp_path)
+    client = TestClient(app)
+    first = upload(client).json()
+    run_id = repository.create_analysis_run(build_analysis_snapshot(
+        first["pgn"],
+        request=AnalyzeRequest(pgn=first["pgn"], game_id=first["game_id"]).model_dump(),
+        engine=app.state.stockfish.identity,
+        maia={"model": "maia3-79m", "checkpoint": "model.pt", "device": "cpu", "use_history": True},
+        moves=[], minefields=[], game_id=first["game_id"],
+    ))
+
+    response = upload(client, PGN + "\n\n" + OTHER).json()
+
+    assert response["game_id"] == first["game_id"]
+    assert response["preferred_analysis_run_id"] == run_id
+    assert [item["id"] for item in response["analysis_history"]] == [run_id]
+    assert response["num_games_added"] == 1 and response["num_games_existing"] == 1
+    assert app.state.stockfish_lock.entries == 0
+    listing = client.get("/api/stored-games?analysis_state=not_analyzed").json()
+    assert listing["total"] == 1 and listing["items"][0]["metadata"]["Event"] == "Other"
+
+
+def test_multi_game_upload_degrades_to_first_game_in_memory_without_persistence(tmp_path):
+    app, _repository = make_app(tmp_path, persistence=False)
+    client = TestClient(app)
+
+    response = upload(client, PGN + "\n\n" + OTHER).json()
+
+    assert response["pgn"].startswith('[Event "API"]')
+    assert response["num_games"] == response["num_unique_games"] == 2
+    assert response["num_games_saved"] == 0
+    assert response["num_games_added"] == response["num_games_existing"] == 0
+    assert response["game_id"] is None
+    assert response["persistence_warning"] == "Local database unavailable"
+    assert app.state.stockfish_lock.entries == 0
 
 
 def test_exact_cache_hit_skips_engine_and_changed_settings_create_history(tmp_path, monkeypatch):
@@ -152,6 +218,20 @@ def test_analysis_rejects_mismatched_game_id(tmp_path):
     )
     assert response.status_code == 409
     assert "does not match" in response.json()["detail"]
+
+
+def test_analysis_endpoint_remains_strictly_single_game(tmp_path):
+    app, _repository = make_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/analyze",
+        json=AnalyzeRequest(pgn=PGN + "\n\n" + OTHER).model_dump(),
+    )
+
+    assert response.status_code == 400
+    assert "one game" in response.json()["detail"]
+    assert app.state.stockfish_lock.entries == 0
 
 
 def test_stored_game_endpoints_address_game_and_specific_run(tmp_path):

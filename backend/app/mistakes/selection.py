@@ -4,6 +4,7 @@ from typing import Any
 
 import chess
 
+from app.config import HISTORICAL_MAIA3_ELO
 from app.persistence.provenance import mistake_fingerprint
 
 from .models import MistakeReason, MistakeSuggestion
@@ -20,8 +21,8 @@ def derive_mistake_suggestions(
     contexts = result.get("move_context", [])
     acceptable_drop = float(request.get("acceptable_drop", 0.5))
     minefield_threshold = float(request.get("minefield_threshold", 0.8))
-    white_elo = int(request.get("maia3_white_elo", 2200))
-    black_elo = int(request.get("maia3_black_elo", 2200))
+    white_elo = int(request.get("maia3_white_elo", HISTORICAL_MAIA3_ELO))
+    black_elo = int(request.get("maia3_black_elo", HISTORICAL_MAIA3_ELO))
     suggestions: list[dict[str, Any]] = []
 
     for ply, move in enumerate(result.get("moves", [])):

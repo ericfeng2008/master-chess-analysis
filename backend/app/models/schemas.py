@@ -2,10 +2,17 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.config import DEFAULT_MAIA3_ELO
+
 
 class PgnUploadResponse(BaseModel):
     pgn: str
     num_games: int
+    num_unique_games: int
+    num_games_added: int
+    num_games_existing: int
+    num_duplicate_games: int
+    num_games_saved: int
     num_variations: int
     max_depth: int
     game_id: str | None = None
@@ -40,8 +47,8 @@ class AnalyzeRequest(BaseModel):
     mbi_outlier_threshold: float = Field(default=0.05, ge=0.01, le=0.20)
     eig_threshold: float = Field(default=2.0, ge=0.5, le=5.0)
     bri_threshold: float = Field(default=0.05, ge=0.01, le=0.20)
-    maia3_white_elo: int = Field(default=2200, ge=0, le=5000)
-    maia3_black_elo: int = Field(default=2200, ge=0, le=5000)
+    maia3_white_elo: int = Field(default=DEFAULT_MAIA3_ELO, ge=0, le=5000)
+    maia3_black_elo: int = Field(default=DEFAULT_MAIA3_ELO, ge=0, le=5000)
 
 
 class AnalysisMoveResult(BaseModel):

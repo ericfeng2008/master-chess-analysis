@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 
 import { ssePost } from '../api/client';
+import { HISTORICAL_MAIA3_ELO } from '../constants/maia3';
 import type { AnalyzeResult, AnalysisMoveResult, AnalysisSSEEvent } from '../types';
 import type { StoredGame } from '../types/mistakes';
 
@@ -123,8 +124,8 @@ export function useGameAnalysis() {
 
   const restoreAnalysis = useCallback((game: StoredGame, selectedPly = 0) => {
     const moves = game.result.moves ?? [];
-    const whiteElo = game.request.maia3_white_elo ?? null;
-    const blackElo = game.request.maia3_black_elo ?? null;
+    const whiteElo = game.request.maia3_white_elo ?? HISTORICAL_MAIA3_ELO;
+    const blackElo = game.request.maia3_black_elo ?? HISTORICAL_MAIA3_ELO;
     setState({
       isAnalyzing: false,
       movesAnalyzed: moves.length,

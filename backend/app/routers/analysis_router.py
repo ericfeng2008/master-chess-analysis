@@ -16,6 +16,8 @@ from app.persistence.provenance import (
     METRIC_SCHEMA_VERSION,
     PgnValidationError,
     build_analysis_snapshot,
+    game_fingerprint,
+    parse_pgn_games,
     parse_single_game_pgn,
 )
 
@@ -77,9 +79,16 @@ async def upload_pgn(file: UploadFile, request: Request):
         )
 
     try:
-        parsed = parse_single_game_pgn(pgn_text)
+        parsed_games = parse_pgn_games(pgn_text)
     except PgnValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    parsed = parsed_games[0]
+    num_unique_games = len({game_fingerprint(game) for game in parsed_games})
+    num_games_added = 0
+    num_games_existing = 0
+    num_duplicate_games = len(parsed_games) - num_unique_games
+    num_games_saved = 0
 
     game_id = None
     fingerprint_version = None
@@ -101,8 +110,14 @@ async def upload_pgn(file: UploadFile, request: Request):
     )
     if repository is not None:
         try:
-            game = repository.upsert_game(parsed)
+            batch = repository.upsert_games(parsed_games)
+            game = batch["games"][0]
             import_result = repository.game_import_result(game)
+            num_unique_games = int(batch["num_unique_games"])
+            num_games_added = int(batch["num_games_added"])
+            num_games_existing = int(batch["num_games_existing"])
+            num_duplicate_games = int(batch["num_duplicate_games"])
+            num_games_saved = int(batch["num_games_saved"])
             game_id = str(game["id"])
             fingerprint_version = int(game["fingerprint_version"])
             game_digest = str(game["game_fingerprint"])
@@ -120,7 +135,12 @@ async def upload_pgn(file: UploadFile, request: Request):
 
     return PgnUploadResponse(
         pgn=parsed.normalized_pgn,
-        num_games=1,
+        num_games=len(parsed_games),
+        num_unique_games=num_unique_games,
+        num_games_added=num_games_added,
+        num_games_existing=num_games_existing,
+        num_duplicate_games=num_duplicate_games,
+        num_games_saved=num_games_saved,
         num_variations=parsed.num_variations,
         max_depth=parsed.max_depth,
         game_id=game_id,

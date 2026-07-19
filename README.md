@@ -147,7 +147,9 @@ export ANALYSIS_STOCKFISH_PATH=/usr/games/stockfish
 
 ### 1. Upload a PGN File
 
-Click **Upload PGN File** next to the move navigator below the chess board. Select a `.pgn` file containing exactly one game. The application parses it, saves it to the local database immediately, and displays its mainline in the PGN viewer. Multi-game files are rejected explicitly rather than silently analyzing only their first game.
+Click **Upload PGN** next to the move navigator below the chess board. A `.pgn` file may contain one game or a sequence of games. The application validates the complete file first, saves every unique game to the local database in one atomic batch, and displays the first game's mainline in the analyzer. The first game is ready for analysis but is not analyzed automatically; the remaining games stay in the Local Game Library as **Not analyzed** until you open and analyze them. If any game is invalid, the complete import is rejected and none of its games are saved.
+
+After import, an inline message beneath the board reports how many entries were loaded, how many unique games were added or already saved, and how many duplicate entries were skipped. Successful messages disappear after eight seconds. The displayed game's variation count and maximum depth always refer to the first game, not the complete batch.
 
 Games are recognized from chess content, not filenames or PGN decoration. The local identity is a versioned SHA-256 fingerprint of the complete initial FEN plus the ordered mainline moves in UCI. Headers, result text, whitespace, comments, annotations, clocks, and side variations do not change that identity. Importing an equivalent PGN therefore reopens the existing logical game and automatically restores its newest saved analysis and settings without running Stockfish or Maia.
 
@@ -155,7 +157,7 @@ Games are recognized from chess content, not filenames or PGN decoration. The lo
 
 The **Analysis Configuration** panel displays 8 configurable sliders organized in two columns.
 
-The game information area also provides separate **White Maia3** and **Black Maia3** Elo controls. Both default to `2200`; select the ratings that best represent each player before starting analysis.
+The game information area also provides separate **White Maia3** and **Black Maia3** Elo controls. Both default to `2600` for new and unanalyzed games; select the ratings that best represent each player before starting analysis. Reopening an analyzed game restores the ratings that were actually used for that saved run.
 
 **Left column:**
 - **Stockfish Engine Depth** (10-20, default 12): Higher depth = more accurate but slower analysis
@@ -246,7 +248,7 @@ Practice shortcuts:
 
 ### Local Game Library
 
-Every valid one-game PGN is saved locally as soon as it is uploaded. **Open Saved Game** opens a searchable, filterable library as an overlay in the current analyzer workspace: choose All, Analyzed, or Not analyzed games, sort by recently opened, recently added, or players, preview a row, then explicitly open it. Opening an analyzed game restores its preferred saved result and history without starting the engines; opening an unanalyzed game restores its PGN and clears the prior analysis state so it is ready to analyze.
+Every unique game in a valid PGN file is saved locally as soon as the complete batch passes validation. Repeated entries in the same file and games already present in the library are deduplicated by chess content, so they do not create extra logical games or analysis runs. **Open Saved Game** opens a searchable, filterable library as an overlay in the current analyzer workspace: choose All, Analyzed, or Not analyzed games, sort by recently opened, recently added, or players, preview a row, then explicitly open it. Opening an analyzed game restores its preferred saved result and history without starting the engines; opening an unanalyzed game, including a trailing game from a multi-game import, restores its PGN and clears the prior analysis state so it is ready to analyze.
 
 The library labels games from effective Tournament/Event, White, and Black values. A manual value takes precedence over a retained usable imported PGN value, which in turn takes precedence over a missing value. Uploading an equivalent PGN can fill a previously missing imported value, but never overwrites a manual correction. Use **Edit details** from Game Info or the library preview to correct these fields; clearing a manual value falls back to the imported value. Raw PGN and analysis-run headers remain unchanged as provenance.
 
@@ -258,7 +260,7 @@ Games, versioned analyses, saved mistakes, tags, and attempts use `backend/data/
 
 Legacy saved mistakes are replayed against their game mainline to backfill stable played-decision identities. If equivalent analysis runs already contain duplicate saved mistakes, migration keeps a deterministic canonical item, unions tags and attempts, preserves distinct notes and evidence in traceable migration metadata, and records retired IDs. Items that cannot be validated safely remain untouched and are reported for diagnosis.
 
-If persistence is unavailable, a valid PGN can still be viewed and analyzed in memory. The UI displays a warning and does not claim that the import or result was saved; cache history remains unavailable until local persistence recovers.
+If persistence is unavailable, the first game in a valid PGN can still be viewed and analyzed in memory. Trailing games are not retained. The UI keeps a non-expiring warning visible and does not claim that the import or result was saved; cache history remains unavailable until local persistence recovers.
 
 Deleting a saved mistake removes only that mistake's tag links and minimal attempt history. The complete analysis run and PGN remain. Back up the SQLite file while the backend is stopped if it contains valuable study data.
 
@@ -364,8 +366,8 @@ When a forced checkmate exists, the position info shows `#N` (White mates in N) 
 | MBI: Outlier Probability | 5% | 1%-20% | Maia probability below which a blunder is a Random Oversight |
 | EIG: Gap Threshold | 2.0 | 0.5-5.0 | Min eval gap (pawns) to flag an Engine-Intuition Gap |
 | BRI: Brilliancy Threshold | 5% | 1%-20% | Max Maia probability for best move to be "Brilliant" |
-| White Maia3 Elo | 2200 | 2000, 2200, 2400, 2600 | White player's rating context for Maia3 |
-| Black Maia3 Elo | 2200 | 2000, 2200, 2400, 2600 | Black player's rating context for Maia3 |
+| White Maia3 Elo | 2600 | 2000, 2200, 2400, 2600 | White player's rating context for Maia3 |
+| Black Maia3 Elo | 2600 | 2000, 2200, 2400, 2600 | Black player's rating context for Maia3 |
 
 ## License
 
