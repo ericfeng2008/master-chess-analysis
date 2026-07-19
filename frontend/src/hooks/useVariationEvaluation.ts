@@ -11,16 +11,23 @@ interface VariationEvaluationDeps {
   acceptableDrop: number;
 }
 
+const EMPTY_CACHE = new Map<string, PositionEvalResult>()
+
 export function useVariationEvaluation(deps: VariationEvaluationDeps) {
   const { variationState, ctiResult, engineDepth, acceptableDrop } = deps;
 
-  const [varEvalCache, setVarEvalCache] = useState<Map<string, PositionEvalResult>>(
-    new Map(),
-  );
-  const [varEvalLoading, setVarEvalLoading] = useState<string | null>(null);
+  const [cacheState, setCacheState] = useState<{ result: AnalyzeResult | null; values: Map<string, PositionEvalResult> }>({ result: null, values: new Map() });
+  const [loadingState, setLoadingState] = useState<{ result: AnalyzeResult | null; fen: string | null }>({ result: null, fen: null });
+  const varEvalCache = cacheState.result === ctiResult ? cacheState.values : EMPTY_CACHE;
+  const varEvalLoading = loadingState.result === ctiResult ? loadingState.fen : null;
 
   const varEvalSeqRef = useRef(0);
   const varEvalFetchedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    varEvalSeqRef.current += 1;
+    varEvalFetchedRef.current.clear();
+  }, [ctiResult]);
 
   useEffect(() => {
     if (!variationState || !ctiResult) {
@@ -47,10 +54,10 @@ export function useVariationEvaluation(deps: VariationEvaluationDeps) {
     const preComputed = analysisMove.best_line_evals?.[fenAfter];
     if (preComputed) {
       queueMicrotask(() => {
-        setVarEvalCache((prev: Map<string, PositionEvalResult>) => {
-          const next = new Map(prev);
+        setCacheState((prev) => {
+          const next = new Map(prev.result === ctiResult ? prev.values : EMPTY_CACHE);
           next.set(fenAfter, preComputed);
-          return next;
+          return { result: ctiResult, values: next };
         });
       });
       return;
@@ -63,7 +70,7 @@ export function useVariationEvaluation(deps: VariationEvaluationDeps) {
 
     const seq = ++varEvalSeqRef.current;
     queueMicrotask(() => {
-      setVarEvalLoading(fenAfter);
+      setLoadingState({ result: ctiResult, fen: fenAfter });
     });
 
     void (async () => {
@@ -80,16 +87,16 @@ export function useVariationEvaluation(deps: VariationEvaluationDeps) {
           mate_in: postResult.mate_in,
         };
 
-        setVarEvalCache((prev: Map<string, PositionEvalResult>) => {
-          const next = new Map(prev);
+        setCacheState((prev) => {
+          const next = new Map(prev.result === ctiResult ? prev.values : EMPTY_CACHE);
           next.set(fenAfter, merged);
-          return next;
+          return { result: ctiResult, values: next };
         });
       } catch {
         varEvalFetchedRef.current.delete(fenAfter);
       } finally {
         if (seq === varEvalSeqRef.current) {
-          setVarEvalLoading(null);
+          setLoadingState({ result: ctiResult, fen: null });
         }
       }
     })();

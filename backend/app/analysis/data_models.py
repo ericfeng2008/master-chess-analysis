@@ -153,6 +153,7 @@ class AnalysisMoveData:
     best_line: list[str]
     best_line_evals: dict[str, dict]
     mate_in: int | None
+    played_move_eval_drop: float | None = None
 
 
 @dataclass

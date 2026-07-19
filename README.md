@@ -18,7 +18,7 @@ Rather than just showing the best move and evaluation, Master Chess Game Analyze
 By combining objective evaluation from Stockfish with human move probabilities from Maia, the analyzer answers questions that neither approach can answer alone:
 
 - **"How hard is this position?"** If Stockfish says only 2 moves are good, and Maia says humans would play one of those 2 moves 90% of the time, the position is easy (low CTI). If Maia says humans would almost never find the good moves, the position is a minefield (high CTI).
-- **"Was this blunder a natural mistake?"** If Maia predicts that most humans would also play the bad move, it's a **Cognitive Trap** — a genuinely tricky position worth studying. If Maia says no human would play it, it's a **Random Oversight** — just a lapse.
+- **"Was this blunder a natural mistake?"** If Maia predicts that many players in the selected Elo context would choose the bad move, it is a **Cognitive Trap** — a genuinely tricky position worth studying. A low-probability error is less characteristic of that Maia population, but the model does not diagnose the individual player's cause.
 - **"Does the engine disagree with human intuition?"** A high **Engine-Intuition Gap (EIG)** means the computer's best move is very different from what humans naturally choose. These are positions where game analysis can reveal non-obvious resources.
 - **"What eval should I realistically expect?"** **EPE** predicts the actual position value assuming the opponent plays like a human, not like a computer. This is often more useful for practical game review than the raw engine eval.
 
@@ -134,6 +134,7 @@ If your engines are installed in non-default locations, or you want to tune engi
 | `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `12` | Backend fallback Stockfish search depth (higher = more accurate but slower) |
 | `ANALYSIS_STOCKFISH_THREADS` | `0` (auto) | CPU threads for Stockfish (`0` = auto-detect: `cpu_count - 1`) |
 | `ANALYSIS_STOCKFISH_HASH_MB` | `256` | Stockfish hash table size in MB (more = better for deep analysis) |
+| `ANALYSIS_DATA_DIR` | `backend/data` | Directory for the local game and Mistake Library SQLite database |
 
 Example:
 
@@ -146,7 +147,9 @@ export ANALYSIS_STOCKFISH_PATH=/usr/games/stockfish
 
 ### 1. Upload a PGN File
 
-Click **Upload PGN File** next to the move navigator below the chess board. Select a `.pgn` file from your computer. The application will parse the file and display the game moves in the PGN viewer.
+Click **Upload PGN File** next to the move navigator below the chess board. Select a `.pgn` file containing exactly one game. The application parses it, saves it to the local database immediately, and displays its mainline in the PGN viewer. Multi-game files are rejected explicitly rather than silently analyzing only their first game.
+
+Games are recognized from chess content, not filenames or PGN decoration. The local identity is a versioned SHA-256 fingerprint of the complete initial FEN plus the ordered mainline moves in UCI. Headers, result text, whitespace, comments, annotations, clocks, and side variations do not change that identity. Importing an equivalent PGN therefore reopens the existing logical game and automatically restores its newest saved analysis and settings without running Stockfish or Maia.
 
 ### 2. Configure Analysis Parameters
 
@@ -170,6 +173,8 @@ The game information area also provides separate **White Maia3** and **Black Mai
 
 Click **Analyze** to start. A progress bar shows positions analyzed and minefields found. Analysis can be canceled at any time.
 
+Completed analyses are immutable versions of the game. Cache compatibility includes every result-affecting setting, the Stockfish and Maia runtime identities, and the result schema version. Clicking **Analyze** with an exact previously completed configuration restores that version without engine work. Changing depth, thresholds, Elo context, or another result-affecting setting creates a new version. The **Analysis history** control identifies versions by date, depth, and runtime provenance and can restore any of them instantly.
+
 ### 4. Navigate Results
 
 After analysis completes:
@@ -177,7 +182,7 @@ After analysis completes:
 - **Chart**: Click any point on the evaluation chart to jump to that move. Use the **White Player** / **Black Player** toggle above the chart to filter CTI lines and markers by perspective.
 - **Move Navigator**: Use the arrow buttons below the board to step through moves.
 - **PGN Viewer**: Click any move in the PGN notation to navigate there. Stockfish best continuations for blunders appear inline in bold green parenthesized notation `(...)`. User-explored variations appear in teal bracket notation `[...]`.
-- **Chess Board**: Updates automatically to show the position for the selected move. Click the flip button to change board orientation. After analysis, drag or click pieces to explore alternative moves.
+- **Chess Board**: Updates automatically to show the position for the selected move. After analysis, a thin vertical evaluation bar beside the main board visualizes that exact position's White-versus-Black balance. Hover over the bar to reveal only its compact White-perspective value: signed pawn scores such as `+1.25` or `-2.50`, signed mate values such as `#3` or `#-2`, and terminal results `1-0` or `0-1`. Explored and Stockfish-variation positions use a neutral striped bar with a `pending` tooltip while their ad-hoc evaluation runs, never a stale mainline value. The segment order flips with the board without changing the score's perspective. Click the flip button to change board orientation. After analysis, drag or click pieces to explore alternative moves.
 - **Position Info**: Shows detailed metrics for the selected move including eval, CTI, minefield status, MBI classification, EIG, BRI, and EPE.
 
 ### 5. Explore Alternative Moves
@@ -191,6 +196,73 @@ After analysis completes, the board becomes interactive. You can test "what if" 
 - **Arrow keys**: Left/Right arrow keys navigate within the active exploration or variation. At the first move, Left exits back to the mainline.
 - **Exit**: Press **Escape**, click any mainline move, or click the chart to exit exploration/variation mode.
 - **Game Info**: Click "Show game info" above the PGN viewer to display PGN metadata (Event, Site, Date, players, Elo, ECO, etc.). The panel auto-hides when you click anywhere else on the page.
+
+### 6. Save Mistakes Worth Revisiting
+
+After analysis completes, the **Mistakes to revisit** panel reads the persisted result for the selected White or Black side. It suggests only the union of:
+
+- **High-CTI mistake** — the played move lost at least the configured acceptable drop and the CTI lower bound met the configured minefield threshold.
+- **Human-natural blunder** — MBI classified the objective blunder as a cognitive trap because Maia3 assigned the played move at least the configured trap probability in the selected Elo context.
+
+A high-CTI position is not saved when the player found an acceptable move. One position matching both reasons appears once with both system labels. Approximate CTI uses its lower bound, so an uncertainty interval that crosses the threshold is not promoted as a definite minefield.
+
+Choose **White** or **Black** under **Mistake made by**. Either side can represent you or your opponent; no player profile is required. Review the compact suggestions and select **Save selected mistakes**. Saving is explicit and duplicate-safe. The completed game analysis and full normalized PGN are already stored locally even when no suggestion is saved.
+
+Re-analysis shows only additional mistakes. A played decision is recognized across analysis versions from the game fingerprint, ply, side, decision FEN, and played UCI move—not from evaluation, best move, or CTI values that may change at a new depth. Active and archived Mistake Library items both suppress the same decision from later capture suggestions. Existing notes, tags, evidence, lifecycle, and practice attempts are never overwritten by re-analysis; deleting an item allows that decision to be suggested again.
+
+Maia likelihood is a model-estimated probability that a player in the selected White/Black Elo context would choose the move. It is not an observed percentage of real players.
+
+### 7. Use the Local Mistake Library
+
+Open **Mistake Library** from the analyzer header. The library is a game-oriented tournament notebook rather than a profile or diagnosis dashboard:
+
+- Filter explicitly by player name across the White and Black PGN headers, while searching event, played move, and note text separately.
+- Filter by the player who made the mistake, `High-CTI mistake`, `Human-natural blunder`, one of your tags, archive state, or last practice result. Filters can be combined.
+- Inspect the original decision board, played move, best and acceptable moves, objective loss, CTI interval, Maia likelihood/Elo context, analysis depth, and stored best line.
+- Add your own note and multiple case-insensitive tags. Remove tags as chips, choose suggested tags, or enter custom ones. Suggested tags include Candidate generation, Calculation horizon, Opponent resource, Resulting-position evaluation, Strategic plan, Opening memory, Defensive resource, Time management, and Execution. These are optional player labels; the application never asserts them as the cause.
+- Archive, restore, or delete a saved mistake without deleting its game.
+- Choose **Open full game** to restore the stored PGN, complete result timeline, analysis settings, and saved position without uploading or analyzing again.
+
+System capture reasons are immutable. Notes and tags are player-owned. Lists are paginated and read only stored SQLite data; browsing does not run Stockfish or Maia.
+
+### 8. Practice Saved Mistakes
+
+Start practice from the current filtered view, an explicit selection, or one mistake. Filtering by a tag and choosing **Practice this view** creates a bounded tag-focused practice queue.
+
+1. **Think** — The board opens at the original decision position from the saved side. The played mistake, best move, CTI/MBI verdict, objective loss, and continuation remain hidden. Play a legal move on the board, enter SAN, or explicitly Reveal without a move.
+2. **Reveal** — Compare your move with the played mistake, best and acceptable moves, objective loss, CTI interval, Maia played-move likelihood/Elo context, and stored best line.
+3. Choose **Again** or **Understood**. The application stores the submitted move, objective acceptability, outcome, and date.
+
+There are no points, streaks, hints, four-grade scheduling, leeches, inferred weaknesses, or engagement rewards. The library can filter `Again` positions when you want another pass.
+
+Practice shortcuts:
+
+| Key | Action |
+|---|---|
+| `R` | Reveal the current position |
+| `1` | Again |
+| `2` | Understood |
+| `Escape` | Return to the Mistake Library |
+
+### Local Game Library
+
+Every valid one-game PGN is saved locally as soon as it is uploaded. **Open Saved Game** opens a searchable, filterable library as an overlay in the current analyzer workspace: choose All, Analyzed, or Not analyzed games, sort by recently opened, recently added, or players, preview a row, then explicitly open it. Opening an analyzed game restores its preferred saved result and history without starting the engines; opening an unanalyzed game restores its PGN and clears the prior analysis state so it is ready to analyze.
+
+The library labels games from effective Tournament/Event, White, and Black values. A manual value takes precedence over a retained usable imported PGN value, which in turn takes precedence over a missing value. Uploading an equivalent PGN can fill a previously missing imported value, but never overwrites a manual correction. Use **Edit details** from Game Info or the library preview to correct these fields; clearing a manual value falls back to the imported value. Raw PGN and analysis-run headers remain unchanged as provenance.
+
+Game identity is deliberately based on the initial position and ordered mainline moves, not PGN headers or file name. Thus two files with identical chess content are one local game even if their event or player details differ. This makes repeat imports and cached analysis restoration reliable, but it cannot distinguish separately played games that have exactly the same initial position and move sequence.
+
+### Storage, Migration, and Privacy
+
+Games, versioned analyses, saved mistakes, tags, and attempts use `backend/data/master-chess-analysis.db` by default. Existing databases are upgraded transactionally to schema 6. Before upgrading an existing schema, the backend creates a sibling backup named like `master-chess-analysis.db.pre-v5-to-v6.bak`. Analysis runs are grouped by the canonical game fingerprint, while unparsable legacy rows remain preserved and are reported as non-cacheable instead of being deleted.
+
+Legacy saved mistakes are replayed against their game mainline to backfill stable played-decision identities. If equivalent analysis runs already contain duplicate saved mistakes, migration keeps a deterministic canonical item, unions tags and attempts, preserves distinct notes and evidence in traceable migration metadata, and records retired IDs. Items that cannot be validated safely remain untouched and are reported for diagnosis.
+
+If persistence is unavailable, a valid PGN can still be viewed and analyzed in memory. The UI displays a warning and does not claim that the import or result was saved; cache history remains unavailable until local persistence recovers.
+
+Deleting a saved mistake removes only that mistake's tag links and minimal attempt history. The complete analysis run and PGN remain. Back up the SQLite file while the backend is stopped if it contains valuable study data.
+
+Everything stays on the local machine. There is no account, cloud synchronization, sharing, coach surveillance, opponent profile, leaderboard, LLM coaching, or live-game feature.
 
 ## Understanding the Analysis Metrics
 
