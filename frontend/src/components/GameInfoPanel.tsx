@@ -10,6 +10,8 @@ interface GameInfoPanelProps {
   setMaia3WhiteElo: (v: number) => void;
   maia3BlackElo: number;
   setMaia3BlackElo: (v: number) => void;
+  onEditMetadata?: () => void;
+  metadataEditingUnavailableReason?: string;
 }
 
 const MAIA3_ELO_OPTIONS = [2000, 2200, 2400, 2600];
@@ -48,6 +50,8 @@ export function GameInfoPanel({
   setMaia3WhiteElo,
   maia3BlackElo,
   setMaia3BlackElo,
+  onEditMetadata,
+  metadataEditingUnavailableReason,
 }: GameInfoPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const hasHeaders = Object.keys(headers).length > 0;
@@ -91,6 +95,8 @@ export function GameInfoPanel({
         >
           {showGameInfo ? "Fold" : "Game Info"}
         </button>
+        {onEditMetadata && <button type="button" className="text-button shrink-0" onClick={onEditMetadata}>Edit details</button>}
+        {!onEditMetadata && metadataEditingUnavailableReason && <button type="button" className="text-button shrink-0" disabled title={metadataEditingUnavailableReason}>Details unavailable</button>}
       </div>
 
       <div className="game-info-elo-row">

@@ -340,6 +340,7 @@ def analyze_game(
                 best_line=best_line,
                 best_line_evals=best_line_evals,
                 mate_in=None,  # populated in post-processing pass
+                played_move_eval_drop=round(max(0.0, eval_drop), 4),
             )
             mate_stm_per_pos.append(stm_mate)
         else:
@@ -390,6 +391,7 @@ def analyze_game(
                 best_line=[],
                 best_line_evals={},
                 mate_in=None,
+                played_move_eval_drop=None,
             )
             mate_stm_per_pos.append(stm_mate)
             is_minefield = False

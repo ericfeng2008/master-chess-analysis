@@ -1,30 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnalysisChart } from "../components/AnalysisChart";
 import { AnalysisChartLegend } from "../components/AnalysisChartLegend";
+import { AnalysisHistoryPanel } from "../components/AnalysisHistoryPanel";
 import { ChessBoard } from "../components/ChessBoard";
 import { ConfigurationPanel } from "../components/ConfigurationPanel";
 import { GameInfoPanel } from "../components/GameInfoPanel";
+import { GameMetadataEditor } from "../components/GameMetadataEditor";
 import { MoveNavigator } from "../components/MoveNavigator";
 import { PgnViewer, type VariationData } from "../components/PgnViewer";
+import { PositionEvaluationBar } from "../components/PositionEvaluationBar";
 import { PositionInfoPanel } from "../components/PositionInfoPanel";
+import { MistakeCapturePanel } from "../components/mistakes/MistakeCapturePanel";
+import { MistakeLibraryWorkspace } from "../components/mistakes/MistakeLibraryWorkspace";
+import { SavedGameLibraryOverlay } from "../components/SavedGameLibraryOverlay";
 import { useAnalyzerHandlers } from "../hooks/useAnalyzerHandler";
 import { useAnalyzerKeyboard } from "../hooks/useAnalyzerKeyboard";
 import { useExploration } from "../hooks/useExploration";
 import { useGameAnalysis } from "../hooks/useGameAnalysis";
 import { useMoveNavigation } from "../hooks/useMoveNavigation";
 import { useVariationEvaluation } from "../hooks/useVariationEvaluation";
+import { getAnalysisRun, getLogicalGame, openStoredGame } from "../api/mistakes";
 import { bestLineFens } from "../utils/bestLineFens";
+import { resolveDisplayedPositionEvaluation } from "../utils/displayedPositionEvaluation";
+import { validateSavedGameSummaryResponse, validateStoredGameOpenResponse } from "../utils/storedGameValidation";
 import { parsePgnHeaders } from "../utils/pgnHeaders";
 import { parsePgnToMoves } from "../utils/pgnParser";
-
-type PgnUploadResponse = {
-  pgn: string;
-  num_games: number;
-  num_variations: number;
-  max_depth: number;
-};
+import type { AnalysisHistoryEntry, PgnUploadResponse } from "../types";
+import type { GameMetadata, StoredGame, StoredGameMetadata, StoredGameSummary } from "../types/mistakes";
 
 type Theme = "dark" | "light";
+type ApplicationView = "analysis" | "mistake-library";
+type ActiveMetadata = GameMetadata & { id: string };
+
+function metadataFromGame(game: Pick<StoredGameMetadata, 'id' | 'metadata' | 'metadata_sources' | 'metadata_missing' | 'metadata_updated_at' | 'source_headers' | 'imported_metadata' | 'metadata_overrides'>): ActiveMetadata {
+  return { id: game.id, metadata: game.metadata ?? {}, metadata_sources: game.metadata_sources ?? { Event: 'missing', White: 'missing', Black: 'missing' }, metadata_missing: game.metadata_missing ?? ['Event', 'White', 'Black'], metadata_updated_at: game.metadata_updated_at ?? null, source_headers: game.source_headers ?? {}, imported_metadata: game.imported_metadata ?? {}, metadata_overrides: game.metadata_overrides ?? {} };
+}
+
+function storedNumber(value: number | undefined, fallback: number) {
+  return Number.isFinite(value) ? value as number : fallback
+}
 
 export function AnalyzerPage() {
   const cti = useGameAnalysis();
@@ -32,10 +46,19 @@ export function AnalyzerPage() {
   const { selectedMoveIndex, selectMove } = cti;
 
   const [pgn, setPgn] = useState<string | null>(null);
+  const [gameId, setGameId] = useState<string | null>(null);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryEntry[]>([]);
+  const [importPersistenceWarning, setImportPersistenceWarning] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<PgnUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [savedLibraryOpen, setSavedLibraryOpen] = useState(false);
+  const [metadataEditorGame, setMetadataEditorGame] = useState<ActiveMetadata | null>(null);
+  const [activeMetadata, setActiveMetadata] = useState<ActiveMetadata | null>(null);
+  const [libraryRefresh, setLibraryRefresh] = useState(0);
+  const [savedGameOpenError, setSavedGameOpenError] = useState<string | null>(null);
+  const [openingGameId, setOpeningGameId] = useState<string | null>(null);
   const boardColumnRef = useRef<HTMLElement>(null);
   const [boardColumnHeight, setBoardColumnHeight] = useState<number | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -44,6 +67,7 @@ export function AnalyzerPage() {
     }
     return window.localStorage.getItem("masterprep-theme") === "dark" ? "dark" : "light";
   });
+  const [applicationView, setApplicationView] = useState<ApplicationView>("analysis");
 
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [perspective, setPerspective] = useState<"white" | "black">("white");
@@ -61,12 +85,29 @@ export function AnalyzerPage() {
   const [maia3WhiteElo, setMaia3WhiteElo] = useState(2200);
   const [maia3BlackElo, setMaia3BlackElo] = useState(2200);
 
+  const restoreStoredAnalysis = (game: StoredGame, selectedPly = 0) => {
+    setAcceptableDrop(storedNumber(game.request.acceptable_drop, 0.5));
+    setMinefieldThreshold(storedNumber(game.request.minefield_threshold, 0.8));
+    setEngineDepth(storedNumber(game.request.engine_depth, 12));
+    setBlunderThreshold(storedNumber(game.request.blunder_threshold, 1));
+    setMbiTrapThreshold(storedNumber(game.request.mbi_trap_threshold, 0.4));
+    setMbiOutlierThreshold(storedNumber(game.request.mbi_outlier_threshold, 0.05));
+    setEigThreshold(storedNumber(game.request.eig_threshold, 2));
+    setBriThreshold(storedNumber(game.request.bri_threshold, 0.05));
+    setMaia3WhiteElo(storedNumber(game.request.maia3_white_elo, 2200));
+    setMaia3BlackElo(storedNumber(game.request.maia3_black_elo, 2200));
+    setGameId(game.game_id);
+    setShowConfig(false);
+    cti.restoreAnalysis(game, selectedPly);
+  };
+
   const [variationState, setVariationState] = useState<{ moveIndex: number; varIndex: number } | null>(null);
   const [showGameInfo, setShowGameInfo] = useState(false);
 
   const parsedGame = useMemo(() => (pgn ? parsePgnToMoves(pgn) : null), [pgn]);
   const parsedMoves = parsedGame?.moves ?? [];
   const pgnHeaders = useMemo(() => (pgn ? parsePgnHeaders(pgn) : {}), [pgn]);
+  const effectiveHeaders = useMemo(() => ({ ...pgnHeaders, ...(activeMetadata?.metadata ?? {}) }), [pgnHeaders, activeMetadata]);
 
   const variations = useMemo<Array<VariationData | null>>(() => {
     if (!cti.result) {
@@ -131,6 +172,7 @@ export function AnalyzerPage() {
     activeIndex,
     parsedMoves,
     pgn,
+    gameId: cti.result?.game_id ?? gameId,
     acceptableDrop,
     minefieldThreshold,
     engineDepth,
@@ -142,6 +184,11 @@ export function AnalyzerPage() {
     maia3WhiteElo,
     maia3BlackElo,
     setPgn,
+    setGameId,
+    setAnalysisHistory,
+    setImportPersistenceWarning,
+    clearAnalysis: cti.clearAnalysis,
+    restoreImportedAnalysis: restoreStoredAnalysis,
     setUploadSummary,
     setUploadError,
     setUploading,
@@ -149,7 +196,65 @@ export function AnalyzerPage() {
     setShowConfig,
     variationState,
     setVariationState,
+    onImportedGame: (result) => {
+      exploration.clearExplorations();
+      setVariationState(null);
+      if (!result.game_id) { setActiveMetadata(null); return; }
+      const metadata: ActiveMetadata = { id: result.game_id, metadata: result.metadata ?? {}, metadata_sources: (result.metadata_sources ?? { Event: 'missing', White: 'missing', Black: 'missing' }) as ActiveMetadata['metadata_sources'], metadata_missing: (result.metadata_missing ?? ['Event', 'White', 'Black']) as ActiveMetadata['metadata_missing'], metadata_updated_at: result.metadata_updated_at ?? null, source_headers: result.source_headers ?? {}, imported_metadata: result.imported_metadata ?? {}, metadata_overrides: result.metadata_overrides ?? {} };
+      setActiveMetadata(metadata);
+      setMetadataEditorGame(metadata.metadata_missing.length > 0 ? metadata : null);
+    },
   });
+
+  const applyMetadata = (game: StoredGameMetadata) => {
+    if (activeMetadata?.id === game.id) setActiveMetadata(metadataFromGame(game));
+    setUploadSummary(current => current && current.game_id === game.id ? { ...current, metadata: game.metadata, metadata_sources: game.metadata_sources, metadata_missing: game.metadata_missing, metadata_updated_at: game.metadata_updated_at, source_headers: game.source_headers, imported_metadata: game.imported_metadata, metadata_overrides: game.metadata_overrides } : current);
+    setMetadataEditorGame(null);
+    setLibraryRefresh(value => value + 1);
+  };
+
+  const loadSavedGame = async (summary: StoredGameSummary) => {
+    if (cti.isAnalyzing) return;
+    try {
+      validateSavedGameSummaryResponse(summary);
+    } catch (error) {
+      setSavedGameOpenError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const isCurrentGame = summary.id === gameId;
+    if (!isCurrentGame && (exploration.isExploring || exploration.savedExplorations.length > 0) && !window.confirm('Open another game? Your current variation exploration will be cleared.')) return;
+    setSavedGameOpenError(null);
+    setOpeningGameId(summary.id);
+    try {
+      const game = await openStoredGame(summary.id);
+      validateStoredGameOpenResponse(game, summary.id);
+      if (isCurrentGame) {
+        setLibraryRefresh(value => value + 1);
+        setSavedLibraryOpen(false);
+        return;
+      }
+      exploration.clearExplorations();
+      setVariationState(null);
+      setPgn(game.normalized_pgn);
+      setGameId(game.id);
+      setAnalysisHistory(game.analysis_history);
+      setImportPersistenceWarning(null);
+      setUploadError(null);
+      setUploadedFileName(`${game.metadata.White ?? 'White'} — ${game.metadata.Black ?? 'Black'} · stored locally`);
+      setUploadSummary({ pgn: game.normalized_pgn, num_games: 1, num_variations: 0, max_depth: game.move_count, game_id: game.id, fingerprint_version: game.fingerprint_version, game_fingerprint: game.game_fingerprint, preferred_analysis_run_id: game.preferred_analysis_run_id, analysis_history: game.analysis_history, persistence_warning: null, metadata: game.metadata, metadata_sources: game.metadata_sources, metadata_missing: game.metadata_missing, metadata_updated_at: game.metadata_updated_at, source_headers: game.source_headers, imported_metadata: game.imported_metadata, metadata_overrides: game.metadata_overrides });
+      setActiveMetadata(metadataFromGame(game));
+      setLibraryRefresh(value => value + 1);
+      if (game.analysis) restoreStoredAnalysis(game.analysis);
+      else { cti.clearAnalysis(); setShowConfig(true); }
+      setSavedLibraryOpen(false);
+      if (game.metadata_missing.length) setMetadataEditorGame(metadataFromGame(game));
+      else setMetadataEditorGame(null);
+    } catch (error) {
+      setSavedGameOpenError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setOpeningGameId(null);
+    }
+  };
 
   const { varEvalCache, varEvalLoading } = useVariationEvaluation({
     variationState,
@@ -201,6 +306,50 @@ export function AnalyzerPage() {
           ? parsedMoves[activeIndex]?.fen ?? cti.result?.moves[activeIndex]?.fen
           : undefined;
 
+  const displayedPositionEvaluation = resolveDisplayedPositionEvaluation({
+    boardFen,
+    exploration,
+    selectedMove,
+    variationState,
+    varEvalCache,
+    varEvalLoading,
+  });
+  const showEvaluationBar = Boolean(
+    cti.result &&
+    cti.result.moves.length > 0 &&
+    !cti.isAnalyzing &&
+    displayedPositionEvaluation,
+  );
+
+  if (applicationView === "mistake-library") {
+    const openStoredGame = (game: StoredGame, ply: number) => {
+      const side = game.result.moves[ply]?.side === "black" ? "black" : "white";
+      setPgn(game.normalized_pgn);
+      setUploadedFileName(`${game.headers.White ?? "White"} — ${game.headers.Black ?? "Black"} · stored locally`);
+      setUploadSummary({
+        pgn: game.normalized_pgn,
+        num_games: 1,
+        num_variations: 0,
+        max_depth: game.result.moves.length,
+        game_id: game.game_id,
+        fingerprint_version: null,
+        game_fingerprint: null,
+        preferred_analysis_run_id: game.id,
+        analysis_history: [],
+        persistence_warning: null,
+      });
+      setPerspective(side);
+      setOrientation(side);
+      restoreStoredAnalysis(game, ply);
+      void getLogicalGame(game.game_id, game.id).then((logical) => {
+        setAnalysisHistory(logical.analysis_history);
+        setActiveMetadata(metadataFromGame(logical));
+      }).catch(() => setAnalysisHistory([]));
+      setApplicationView("analysis");
+    };
+    return <div className="app-shell"><MistakeLibraryWorkspace onBack={() => setApplicationView("analysis")} onOpenGame={openStoredGame} /></div>;
+  }
+
   return (
     <div className="app-shell">
       <div className="workbench">
@@ -232,6 +381,7 @@ export function AnalyzerPage() {
             </p>
           </div>
           <div className="header-controls">
+            <button type="button" className="primary-button" onClick={() => setApplicationView("mistake-library")}>Mistake Library</button>
             {hasResult && (
               <div className="segment-control" aria-label="Analysis perspective">
                 <button
@@ -255,15 +405,29 @@ export function AnalyzerPage() {
           </div>
         </header>
 
+        {(cti.result?.persistence_warning || importPersistenceWarning) && <div className="review-alert analysis-persistence-warning">{cti.result?.persistence_warning || importPersistenceWarning}</div>}
+
         <div className={`workspace-grid ${cti.result ? "has-chart" : "no-chart"}`}>
           <aside ref={boardColumnRef} className="board-column">
             <div className="board-frame">
-              <ChessBoard
-                fen={boardFen}
-                orientation={orientation}
-                interactive={hasResult && !cti.isAnalyzing}
-                onMove={handlers.handleBoardMove}
-              />
+              <div className="main-board-stage">
+                <div className="main-board-stage__board">
+                  <ChessBoard
+                    fen={boardFen}
+                    orientation={orientation}
+                    interactive={hasResult && !cti.isAnalyzing}
+                    onMove={handlers.handleBoardMove}
+                  />
+                </div>
+                {showEvaluationBar && displayedPositionEvaluation && (
+                  <PositionEvaluationBar
+                    evaluation={displayedPositionEvaluation.evaluation}
+                    mateIn={displayedPositionEvaluation.mateIn}
+                    orientation={orientation}
+                    status={displayedPositionEvaluation.status}
+                  />
+                )}
+              </div>
             </div>
 
             <div className="panel panel-radius panel-pad">
@@ -288,6 +452,7 @@ export function AnalyzerPage() {
                     className="hidden"
                   />
                 </label>
+                <button type="button" className="text-button shrink-0" disabled={cti.isAnalyzing} onClick={() => setSavedLibraryOpen(true)}>Open Saved Game</button>
               </div>
 
               {uploadedFileName && (
@@ -329,13 +494,15 @@ export function AnalyzerPage() {
             {pgn ? (
               <section className="panel panel-radius panel-pad notation-box">
                 <GameInfoPanel
-                  headers={pgnHeaders}
+                  headers={effectiveHeaders}
                   showGameInfo={showGameInfo}
                   setShowGameInfo={setShowGameInfo}
                   maia3WhiteElo={maia3WhiteElo}
                   setMaia3WhiteElo={setMaia3WhiteElo}
                   maia3BlackElo={maia3BlackElo}
                   setMaia3BlackElo={setMaia3BlackElo}
+                  onEditMetadata={activeMetadata ? () => setMetadataEditorGame(activeMetadata) : undefined}
+                  metadataEditingUnavailableReason={!activeMetadata && importPersistenceWarning ? 'Game details cannot be edited until local storage is available.' : undefined}
                 />
 
                 <PgnViewer
@@ -411,6 +578,18 @@ export function AnalyzerPage() {
           </main>
 
           <aside className="analysis-column">
+            <AnalysisHistoryPanel
+              history={cti.result?.analysis_history ?? analysisHistory}
+              activeRunId={cti.result?.analysis_run_id ?? null}
+              cacheHit={Boolean(cti.result?.cache_hit)}
+              disabled={cti.isAnalyzing}
+              onSelect={(runId) => {
+                setUploadError(null);
+                void getAnalysisRun(runId)
+                  .then((run) => restoreStoredAnalysis(run))
+                  .catch((error: unknown) => setUploadError(error instanceof Error ? error.message : String(error)));
+              }}
+            />
             <ConfigurationPanel
               showConfig={showConfig}
               setShowConfig={setShowConfig}
@@ -450,9 +629,21 @@ export function AnalyzerPage() {
               varEvalLoading={varEvalLoading}
               ctiResult={cti.result}
             />
+
+            {cti.result?.analysis_run_id && <MistakeCapturePanel analysisRunId={cti.result.analysis_run_id} studySide={perspective} players={{white:effectiveHeaders.White,black:effectiveHeaders.Black}} onStudySideChange={setPerspective} onJumpToMove={(ply) => { cti.selectMove(ply); nav.goTo(ply) }} onOpenLibrary={() => setApplicationView("mistake-library")} />}
           </aside>
         </div>
       </div>
+      <SavedGameLibraryOverlay open={savedLibraryOpen} disabled={cti.isAnalyzing} refreshToken={libraryRefresh} openError={savedGameOpenError} openingGameId={openingGameId} onClose={() => { setSavedLibraryOpen(false); setSavedGameOpenError(null) }} onPreviewGame={() => setSavedGameOpenError(null)} onOpenGame={(game) => void loadSavedGame(game)} onEditMetadata={(game) => {
+        setSavedGameOpenError(null);
+        try {
+          validateSavedGameSummaryResponse(game);
+          setMetadataEditorGame(metadataFromGame(game));
+        } catch (error) {
+          setSavedGameOpenError(error instanceof Error ? error.message : String(error));
+        }
+      }} />
+      {metadataEditorGame && <GameMetadataEditor game={metadataEditorGame} onClose={() => setMetadataEditorGame(null)} onSaved={applyMetadata} />}
     </div>
   );
 }

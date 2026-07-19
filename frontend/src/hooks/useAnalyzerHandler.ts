@@ -2,7 +2,9 @@ import { useCallback, type ChangeEvent } from 'react';
 import { Chess } from 'chess.js';
 
 import { apiPostForm } from '../api/client';
-import type { PgnUploadResponse, ParsedMove, AnalyzeResult, PositionEvalResult } from '../types';
+import { getAnalysisRun } from '../api/mistakes';
+import type { AnalysisHistoryEntry, PgnUploadResponse, ParsedMove, AnalyzeResult, PositionEvalResult } from '../types';
+import type { StoredGame } from '../types/mistakes';
 import { bestLineFens } from '../utils/bestLineFens';
 
 type ExplorationMoveInput = {
@@ -18,6 +20,7 @@ export interface AnalyzerHandlersDeps {
   selectMove: (index: number) => void;
   startAnalysis: (
     pgn: string,
+    gameId: string | null,
     acceptableDrop: number,
     minefieldThreshold: number,
     engineDepth: number,
@@ -53,6 +56,7 @@ export interface AnalyzerHandlersDeps {
   activeIndex: number | null;
   parsedMoves: ParsedMove[];
   pgn: string | null;
+  gameId: string | null;
   acceptableDrop: number;
   minefieldThreshold: number;
   engineDepth: number;
@@ -64,6 +68,11 @@ export interface AnalyzerHandlersDeps {
   maia3WhiteElo: number;
   maia3BlackElo: number;
   setPgn: (v: string | null) => void;
+  setGameId: (v: string | null) => void;
+  setAnalysisHistory: (v: AnalysisHistoryEntry[]) => void;
+  setImportPersistenceWarning: (v: string | null) => void;
+  clearAnalysis: () => void;
+  restoreImportedAnalysis: (game: StoredGame) => void;
   setUploadSummary: (v: PgnUploadResponse | null) => void;
   setUploadError: (v: string | null) => void;
   setUploading: (v: boolean) => void;
@@ -71,6 +80,7 @@ export interface AnalyzerHandlersDeps {
   setShowConfig: (v: boolean | ((prev: boolean) => boolean)) => void;
   variationState: { moveIndex: number; varIndex: number } | null;
   setVariationState: (v: { moveIndex: number; varIndex: number } | null) => void;
+  onImportedGame?: (result: PgnUploadResponse) => void;
 }
 
 function normalizeEvalResult(ev: PositionEvalResult | undefined): PositionEvalResult | null {
@@ -108,6 +118,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     activeIndex,
     parsedMoves,
     pgn,
+    gameId,
     acceptableDrop,
     minefieldThreshold,
     engineDepth,
@@ -119,6 +130,11 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     maia3WhiteElo,
     maia3BlackElo,
     setPgn,
+    setGameId,
+    setAnalysisHistory,
+    setImportPersistenceWarning,
+    clearAnalysis,
+    restoreImportedAnalysis,
     setUploadSummary,
     setUploadError,
     setUploading,
@@ -126,6 +142,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     setShowConfig,
     variationState,
     setVariationState,
+    onImportedGame,
   } = d;
 
   const handleNavIndexChange = useCallback(
@@ -162,12 +179,23 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
       const form = new FormData();
       form.append('file', file);
       const res = await apiPostForm<PgnUploadResponse>('/api/upload-pgn', form);
+      clearAnalysis();
       setUploadSummary(res);
       setPgn(res.pgn);
+      setGameId(res.game_id);
+      setAnalysisHistory(res.analysis_history);
+      setImportPersistenceWarning(res.persistence_warning);
+      onImportedGame?.(res);
+      if (res.preferred_analysis_run_id) {
+        const saved = await getAnalysisRun(res.preferred_analysis_run_id);
+        restoreImportedAnalysis(saved);
+        setShowConfig(false);
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   }
 
@@ -179,6 +207,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     setShowConfig(false);
     startAnalysis(
       pgn,
+      gameId,
       acceptableDrop,
       minefieldThreshold,
       engineDepth,

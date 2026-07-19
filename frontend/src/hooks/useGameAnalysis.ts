@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 
 import { ssePost } from '../api/client';
 import type { AnalyzeResult, AnalysisMoveResult, AnalysisSSEEvent } from '../types';
+import type { StoredGame } from '../types/mistakes';
 
 interface GameAnalysisState {
   isAnalyzing: boolean;
@@ -33,6 +34,7 @@ export function useGameAnalysis() {
   const startAnalysis = useCallback(
     (
       pgn: string,
+      gameId: string | null,
       acceptableDrop: number,
       minefieldThreshold: number,
       engineDepth: number,
@@ -62,6 +64,7 @@ export function useGameAnalysis() {
         '/api/analyze',
         {
           pgn,
+          game_id: gameId,
           acceptable_drop: acceptableDrop,
           minefield_threshold: minefieldThreshold,
           engine_depth: engineDepth,
@@ -89,6 +92,11 @@ export function useGameAnalysis() {
               result: {
                 moves: event.moves as AnalysisMoveResult[],
                 minefields: event.minefields,
+                analysis_run_id: event.analysis_run_id,
+                persistence_warning: event.persistence_warning,
+                game_id: event.game_id,
+                cache_hit: event.cache_hit,
+                analysis_history: event.analysis_history,
               },
               selectedMoveIndex: event.moves.length > 0 ? 0 : null,
             }));
@@ -113,5 +121,43 @@ export function useGameAnalysis() {
     setState((s: GameAnalysisState) => ({ ...s, selectedMoveIndex: index }));
   }, []);
 
-  return { ...state, startAnalysis, cancelAnalysis, selectMove };
+  const restoreAnalysis = useCallback((game: StoredGame, selectedPly = 0) => {
+    const moves = game.result.moves ?? [];
+    const whiteElo = game.request.maia3_white_elo ?? null;
+    const blackElo = game.request.maia3_black_elo ?? null;
+    setState({
+      isAnalyzing: false,
+      movesAnalyzed: moves.length,
+      totalMoves: moves.length,
+      minefieldsFound: game.result.minefields?.length ?? 0,
+      result: {
+        ...game.result,
+        analysis_run_id: game.id,
+        persistence_warning: null,
+        game_id: game.game_id,
+        cache_hit: true,
+      },
+      selectedMoveIndex: moves.length ? Math.max(0, Math.min(selectedPly, moves.length - 1)) : null,
+      error: null,
+      analysisMaia3WhiteElo: whiteElo,
+      analysisMaia3BlackElo: blackElo,
+    });
+  }, []);
+
+  const clearAnalysis = useCallback(() => {
+    controllerRef.current?.abort();
+    setState({
+      isAnalyzing: false,
+      movesAnalyzed: 0,
+      totalMoves: 0,
+      minefieldsFound: 0,
+      result: null,
+      selectedMoveIndex: null,
+      error: null,
+      analysisMaia3WhiteElo: null,
+      analysisMaia3BlackElo: null,
+    });
+  }, []);
+
+  return { ...state, startAnalysis, cancelAnalysis, selectMove, restoreAnalysis, clearAnalysis };
 }

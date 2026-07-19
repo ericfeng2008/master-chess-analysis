@@ -1,9 +1,8 @@
-import io
 import json
 import threading
+from dataclasses import asdict
 
 import chess
-import chess.pgn
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -12,35 +11,60 @@ from app.analysis.data_models import AnalysisCompleteEvent, AnalysisProgressEven
 from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 from app.models.schemas import AnalyzeRequest, EvaluatePositionRequest, EvaluatePositionResponse, PgnUploadResponse
-from app.pgn_utils import normalize_pgn_for_python_chess
+from app.persistence import AnalysisRepository
+from app.persistence.provenance import (
+    METRIC_SCHEMA_VERSION,
+    PgnValidationError,
+    build_analysis_snapshot,
+    parse_single_game_pgn,
+)
 
 router = APIRouter()
 
 
-def _count_variations(node: chess.pgn.GameNode) -> tuple[int, int]:
-    """Count total variations and max depth in a game tree.
+def _maia_identity(maia: Maia3Client) -> dict:
+    checkpoint = getattr(maia, "checkpoint_path", None)
+    return {
+        "model": getattr(maia, "model_name", "unknown"),
+        "checkpoint": getattr(checkpoint, "name", str(checkpoint or "unknown")),
+        "device": getattr(maia, "device", "unknown"),
+        "use_history": bool(getattr(maia, "use_history", False)),
+    }
 
-    Returns (num_variations, max_depth) where num_variations counts
-    every branching variation and max_depth is the longest line in
-    half-moves.
-    """
-    variations = 0
-    max_depth = 0
 
-    def walk(node: chess.pgn.GameNode, depth: int):
-        nonlocal variations, max_depth
-        max_depth = max(max_depth, depth)
-        for i, variation in enumerate(node.variations):
-            if i > 0:
-                variations += 1
-            walk(variation, depth + 1)
+def _engine_identity(stockfish: StockfishClient, depth: int) -> dict:
+    identity = dict(stockfish.identity)
+    identity["depth"] = depth
+    return identity
 
-    walk(node, 0)
-    return variations, max_depth
+
+def _complete_event(
+    *,
+    moves: list[dict],
+    minefields: list[int],
+    analysis_run_id: str | None,
+    game_id: str | None,
+    cache_hit: bool,
+    analysis_history: list[dict],
+    persistence_warning: str | None,
+) -> str:
+    data = json.dumps(
+        {
+            "type": "complete",
+            "moves": moves,
+            "minefields": minefields,
+            "analysis_run_id": analysis_run_id,
+            "game_id": game_id,
+            "cache_hit": cache_hit,
+            "analysis_history": analysis_history,
+            "persistence_warning": persistence_warning,
+        }
+    )
+    return f"data: {data}\n\n"
 
 
 @router.post("/api/upload-pgn", response_model=PgnUploadResponse)
-async def upload_pgn(file: UploadFile):
+async def upload_pgn(file: UploadFile, request: Request):
     content = await file.read()
     if not content or not content.strip():
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -52,31 +76,66 @@ async def upload_pgn(file: UploadFile):
             status_code=400, detail="File is not valid text (expected UTF-8 PGN)"
         )
 
-    pgn_text = normalize_pgn_for_python_chess(pgn_text)
-    pgn_io = io.StringIO(pgn_text)
-    num_games = 0
-    total_variations = 0
-    overall_max_depth = 0
+    try:
+        parsed = parse_single_game_pgn(pgn_text)
+    except PgnValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    while True:
-        game = chess.pgn.read_game(pgn_io)
-        if game is None:
-            break
-        num_games += 1
-        variations, max_depth = _count_variations(game)
-        total_variations += variations
-        overall_max_depth = max(overall_max_depth, max_depth)
-
-    if num_games == 0:
-        raise HTTPException(
-            status_code=400, detail="File contains no valid PGN games"
-        )
+    game_id = None
+    fingerprint_version = None
+    game_digest = None
+    preferred_run_id = None
+    history: list[dict] = []
+    metadata: dict[str, str] = {}
+    metadata_sources: dict[str, str] = {}
+    metadata_missing: list[str] = []
+    metadata_updated_at: str | None = None
+    source_headers: dict[str, str] = {}
+    imported_metadata: dict[str, str] = {}
+    metadata_overrides: dict[str, str] = {}
+    persistence_warning: str | None = getattr(
+        request.app.state, "persistence_warning", None
+    )
+    repository: AnalysisRepository | None = getattr(
+        request.app.state, "analysis_repository", None
+    )
+    if repository is not None:
+        try:
+            game = repository.upsert_game(parsed)
+            import_result = repository.game_import_result(game)
+            game_id = str(game["id"])
+            fingerprint_version = int(game["fingerprint_version"])
+            game_digest = str(game["game_fingerprint"])
+            preferred_run_id = import_result["preferred_analysis_run_id"]
+            history = import_result["analysis_history"]
+            metadata = import_result["metadata"]
+            metadata_sources = import_result["metadata_sources"]
+            metadata_missing = import_result["metadata_missing"]
+            metadata_updated_at = import_result["metadata_updated_at"]
+            source_headers = import_result["source_headers"]
+            imported_metadata = import_result["imported_metadata"]
+            metadata_overrides = import_result["metadata_overrides"]
+        except Exception as exc:
+            persistence_warning = f"Game opened, but it could not be saved locally: {exc}"
 
     return PgnUploadResponse(
-        pgn=pgn_text,
-        num_games=num_games,
-        num_variations=total_variations,
-        max_depth=overall_max_depth,
+        pgn=parsed.normalized_pgn,
+        num_games=1,
+        num_variations=parsed.num_variations,
+        max_depth=parsed.max_depth,
+        game_id=game_id,
+        fingerprint_version=fingerprint_version,
+        game_fingerprint=game_digest,
+        preferred_analysis_run_id=preferred_run_id,
+        analysis_history=history,
+        persistence_warning=persistence_warning,
+        metadata=metadata,
+        metadata_sources=metadata_sources,
+        metadata_missing=metadata_missing,
+        metadata_updated_at=metadata_updated_at,
+        source_headers=source_headers,
+        imported_metadata=imported_metadata,
+        metadata_overrides=metadata_overrides,
     )
 
 
@@ -85,6 +144,58 @@ async def analyze(request: AnalyzeRequest, req: Request):
     stockfish: StockfishClient = req.app.state.stockfish
     maia: Maia3Client = req.app.state.maia
     lock: threading.Lock = req.app.state.stockfish_lock
+    repository: AnalysisRepository | None = getattr(req.app.state, "analysis_repository", None)
+    startup_persistence_warning: str | None = getattr(
+        req.app.state, "persistence_warning", None
+    )
+
+    try:
+        parsed = parse_single_game_pgn(request.pgn)
+    except PgnValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    engine_identity = _engine_identity(stockfish, request.engine_depth)
+    maia_identity = _maia_identity(maia)
+    logical_game: dict | None = None
+    game_id: str | None = None
+    compatibility_digest: str | None = None
+    if repository is not None:
+        try:
+            logical_game = repository.resolve_game(request.game_id, parsed.normalized_pgn)
+            game_id = str(logical_game["id"])
+            compatibility_digest = repository.compatible_fingerprint(
+                logical_game,
+                request.model_dump(),
+                engine_identity,
+                maia_identity,
+                METRIC_SCHEMA_VERSION,
+            )
+            cached = repository.find_compatible_analysis(game_id, compatibility_digest)
+            if cached is not None:
+                history = repository.analysis_history(game_id)
+
+                def cached_stream():
+                    result = cached.get("result", {})
+                    yield _complete_event(
+                        moves=list(result.get("moves", [])),
+                        minefields=list(result.get("minefields", [])),
+                        analysis_run_id=str(cached["id"]),
+                        game_id=game_id,
+                        cache_hit=True,
+                        analysis_history=history,
+                        persistence_warning=startup_persistence_warning,
+                    )
+
+                return StreamingResponse(cached_stream(), media_type="text/event-stream")
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Stored game not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            startup_persistence_warning = (
+                f"Analysis is available, but local cache lookup failed: {exc}"
+            )
+            repository = None
 
     def event_stream():
         # Set the requested analysis depth on the shared engine instance.
@@ -116,41 +227,40 @@ async def analyze(request: AnalyzeRequest, req: Request):
                         })
                         yield f"data: {data}\n\n"
                     elif isinstance(event, AnalysisCompleteEvent):
-                        moves_data = []
-                        for m in event.moves:
-                            moves_data.append({
-                                "move_number": m.move_number,
-                                "side": m.side,
-                                "move": m.move,
-                                "fen": m.fen,
-                                "stockfish_eval": m.stockfish_eval,
-                                "eval_after": m.eval_after,
-                                "cti": m.cti,
-                                "cti_lower_bound": m.cti_lower_bound,
-                                "cti_upper_bound": m.cti_upper_bound,
-                                "cti_remaining_mass": m.cti_remaining_mass,
-                                "cti_is_approximate": m.cti_is_approximate,
-                                "best_move": m.best_move,
-                                "good_moves": m.good_moves,
-                                "good_moves_with_eval": m.good_moves_with_eval,
-                                "is_minefield": m.is_minefield,
-                                "mbi_classification": m.mbi_classification,
-                                "mbi_maia_prob": m.mbi_maia_prob,
-                                "eig_value": m.eig_value,
-                                "is_eig_flagged": m.is_eig_flagged,
-                                "is_brilliant": m.is_brilliant,
-                                "bri_maia_prob": m.bri_maia_prob,
-                                "epe_score": m.epe_score,
-                                "best_line": m.best_line,
-                                "best_line_evals": m.best_line_evals,
-                                "mate_in": m.mate_in,
-                            })
-                        data = json.dumps({
-                            "type": "complete",
-                            "moves": moves_data,
-                            "minefields": event.minefields,
-                        })
-                        yield f"data: {data}\n\n"
+                        moves_data = [asdict(move) for move in event.moves]
+                        analysis_run_id: str | None = None
+                        persistence_warning = startup_persistence_warning
+                        if repository is not None:
+                            try:
+                                snapshot = build_analysis_snapshot(
+                                    pgn_text=parsed.normalized_pgn,
+                                    request=request.model_dump(),
+                                    engine=engine_identity,
+                                    maia=maia_identity,
+                                    moves=event.moves,
+                                    minefields=event.minefields,
+                                    game_id=game_id,
+                                )
+                                analysis_run_id = repository.create_analysis_run(snapshot)
+                            except Exception as exc:
+                                persistence_warning = (
+                                    "Analysis completed, but the local Mistake Library cannot "
+                                    f"save this game because persistence failed: {exc}"
+                                )
+                        history = (
+                            repository.analysis_history(game_id)
+                            if repository is not None and game_id is not None
+                            else []
+                        )
+                        yield _complete_event(
+                            moves=moves_data,
+                            minefields=event.minefields,
+                            analysis_run_id=analysis_run_id,
+                            game_id=game_id,
+                            cache_hit=False,
+                            analysis_history=history,
+                            persistence_warning=persistence_warning,
+                        )
             finally:
                 stockfish.depth = original_depth
 

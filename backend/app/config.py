@@ -16,10 +16,11 @@ class Settings(BaseSettings):
     default_engine_depth: int = 12
     stockfish_threads: int = 0  # 0 = auto-detect (cpu_count - 1)
     stockfish_hash_mb: int = 256
-    default_bait_threshold: float = 0.50
-    default_punishment_threshold: float = 1.5
-    default_acceptable_drop: float = 0.5
-    default_minefield_threshold: float = 0.80
+    data_dir: str = str(BACKEND_DIR / "data")
+
+    @property
+    def database_path(self) -> Path:
+        return Path(self.data_dir).expanduser() / "master-chess-analysis.db"
 
     model_config = {"env_prefix": "ANALYSIS_"}
 

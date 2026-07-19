@@ -14,7 +14,10 @@ from app.config import (
 )
 from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
+from app.persistence import AnalysisRepository, Database, DatabaseUnavailableError
 from app.routers.analysis_router import router as analysis_router
+from app.mistakes import MistakeRepository
+from app.routers.mistake_router import router as mistake_router
 
 # Global engine singletons, initialized during app lifespan.
 # Access via app.state.stockfish / app.state.maia.
@@ -25,6 +28,20 @@ stockfish_lock = threading.Lock()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    database = Database(settings.database_path)
+    try:
+        database.initialize()
+        app.state.analysis_repository = AnalysisRepository(database)
+        app.state.mistake_repository = MistakeRepository(database)
+        app.state.mistake_import_summary = app.state.mistake_repository.import_legacy_training_items()
+        app.state.persistence_warning = None
+    except DatabaseUnavailableError as exc:
+        # Ordinary analysis remains usable if local review storage is unavailable.
+        app.state.analysis_repository = None
+        app.state.mistake_repository = None
+        app.state.mistake_import_summary = None
+        app.state.persistence_warning = str(exc)
+    app.state.database = database
     # Startup: create engine singletons
     app.state.stockfish = StockfishClient(
         settings.stockfish_path,
@@ -44,6 +61,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: close engines (maia first to stop accepting predict() calls)
     await app.state.maia.close()
     app.state.stockfish.close()
+    app.state.database.close()
 
 
 app = FastAPI(title="MasterPrep Analytics", lifespan=lifespan)
@@ -62,6 +80,7 @@ app.add_middleware(
 )
 
 app.include_router(analysis_router)
+app.include_router(mistake_router)
 
 
 @app.get("/api/health")

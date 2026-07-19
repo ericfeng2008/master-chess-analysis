@@ -20,12 +20,26 @@ def extract_mate(score: chess.engine.PovScore) -> int | None:
 
 class StockfishClient:
     def __init__(self, path: str, depth: int = 20, threads: int = 0, hash_mb: int = 256):
+        self.path = path
+        self.requested_threads = threads
+        self.hash_mb = hash_mb
         self.engine = chess.engine.SimpleEngine.popen_uci(path)
         self.depth = depth
         # Auto-detect CPU count if threads=0
         if threads <= 0:
             threads = max(1, (os.cpu_count() or 2) - 1)
+        self.threads = threads
         self.engine.configure({"Threads": threads, "Hash": hash_mb})
+
+    @property
+    def identity(self) -> dict:
+        return {
+            "name": self.engine.id.get("name", "Stockfish"),
+            "path": self.path,
+            "depth": self.depth,
+            "threads": self.threads,
+            "hash_mb": self.hash_mb,
+        }
 
     def evaluate(self, board: chess.Board) -> float:
         """Return evaluation in pawns from side-to-move perspective."""
@@ -106,6 +120,68 @@ class StockfishClient:
             evaluation = score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
             results[move] = (evaluation, pv_line, mate)
         return results
+
+    def analyse_candidates(
+        self,
+        board: chess.Board,
+        depth: int,
+        multipv: int = 4,
+        root_moves: list[chess.Move] | None = None,
+    ) -> list[dict]:
+        """Return bounded root evidence including WDL and search provenance."""
+        if board.is_game_over() or board.legal_moves.count() == 0:
+            return []
+        roots = None
+        if root_moves is not None:
+            roots = list(dict.fromkeys(root_moves))
+            illegal = [move for move in roots if move not in board.legal_moves]
+            if illegal:
+                raise ValueError(f"Illegal root move for position: {illegal[0].uci()}")
+            multipv = min(multipv, len(roots))
+        else:
+            multipv = min(multipv, board.legal_moves.count())
+        infos = self.engine.analyse(
+            board,
+            chess.engine.Limit(depth=depth),
+            multipv=max(1, multipv),
+            root_moves=roots,
+            info=chess.engine.INFO_ALL,
+        )
+        if isinstance(infos, dict):
+            infos = [infos]
+        candidates: list[dict] = []
+        for info in infos:
+            pv = info.get("pv", [])
+            if not pv:
+                continue
+            relative = info["score"].relative
+            raw_wdl = relative.wdl(model="sf", ply=max(1, board.ply()))
+            pv_board = board.copy()
+            pv_san: list[str] = []
+            for move in pv:
+                if move not in pv_board.legal_moves:
+                    break
+                pv_san.append(pv_board.san(move))
+                pv_board.push(move)
+            candidates.append(
+                {
+                    "move": board.san(pv[0]),
+                    "uci": pv[0].uci(),
+                    "eval": relative.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0,
+                    "mate": relative.mate() if relative.is_mate() else None,
+                    "wdl": {
+                        "win": raw_wdl.wins / raw_wdl.total(),
+                        "draw": raw_wdl.draws / raw_wdl.total(),
+                        "loss": raw_wdl.losses / raw_wdl.total(),
+                    },
+                    "expected_score": (raw_wdl.wins + raw_wdl.draws / 2) / raw_wdl.total(),
+                    "pv": pv_san,
+                    "depth": int(info.get("depth", depth)),
+                    "seldepth": int(info.get("seldepth", 0)),
+                    "nodes": int(info.get("nodes", 0)),
+                }
+            )
+        return candidates
 
     def evaluate_all_moves(
         self,

@@ -222,6 +222,12 @@ export function useExploration() {
     });
   }, [saveNewExploration]);
 
+  const clearExplorations = useCallback(() => {
+    evalSeqRef.current += 1;
+    setState(INITIAL_ACTIVE);
+    setSavedExplorations([]);
+  }, []);
+
   const enterSavedExploration = useCallback(
     (savedIndex: number, moveIndex: number) => {
       const snapshot = savedExplorations[savedIndex];
@@ -251,6 +257,7 @@ export function useExploration() {
     addExploredMove,
     navigateExploration,
     exitExploration,
+    clearExplorations,
     enterSavedExploration,
   };
 }

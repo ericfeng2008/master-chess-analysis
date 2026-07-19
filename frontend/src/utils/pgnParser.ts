@@ -34,13 +34,13 @@ function extractMainlineMovetext(pgn: string): string {
 }
 
 export function parsePgnToMoves(pgn: string): ParsedGame | null {
-  const startingFen = new Chess().fen()
+  const startingFen = startingFenFromPgn(pgn)
 
   try {
     const chess = new Chess()
     chess.loadPgn(pgn)
     if (chess.history().length > 0) {
-      return replayFromHistory(chess.history(), startingFen)
+      return replayFromHistory(chess.history(), chess.getHeaders().FEN ?? startingFen)
     }
   } catch {
     // fall through to more tolerant parsing
@@ -50,22 +50,30 @@ export function parsePgnToMoves(pgn: string): ParsedGame | null {
   if (!movetext) return null
 
   try {
-    const chess = new Chess()
-    chess.loadPgn(movetext)
-    if (chess.history().length > 0) {
-      return replayFromHistory(chess.history(), startingFen)
+    if (startingFen === new Chess().fen()) {
+      const chess = new Chess()
+      chess.loadPgn(movetext)
+      if (chess.history().length > 0) {
+        return replayFromHistory(chess.history(), startingFen)
+      }
     }
   } catch {
     // fall through to manual replay
   }
 
-  return replayMovetextManually(movetext)
+  return replayMovetextManually(movetext, startingFen)
+}
+
+function startingFenFromPgn(pgn: string): string {
+  const declared = pgn.match(/^\s*\[FEN\s+"([^"]+)"\]\s*$/mi)?.[1]
+  if (!declared) return new Chess().fen()
+  try { return new Chess(declared).fen() } catch { return new Chess().fen() }
 }
 
 function replayFromHistory(history: string[], startingFen: string): ParsedGame | null {
   if (history.length === 0) return null
 
-  const replay = new Chess()
+  const replay = new Chess(startingFen)
   const moves: ParsedMove[] = []
 
   for (let i = 0; i < history.length; i += 1) {
@@ -82,10 +90,9 @@ function replayFromHistory(history: string[], startingFen: string): ParsedGame |
   return { startingFen, moves }
 }
 
-function replayMovetextManually(movetext: string): ParsedGame | null {
+function replayMovetextManually(movetext: string, startingFen = new Chess().fen()): ParsedGame | null {
   try {
-    const chess = new Chess()
-    const startingFen = chess.fen()
+    const chess = new Chess(startingFen)
     const moves: ParsedMove[] = []
 
     const tokens = movetext.split(/\s+/).filter((token) => {

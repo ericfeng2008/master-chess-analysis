@@ -3,6 +3,31 @@ export interface PgnUploadResponse {
   num_games: number;
   num_variations: number;
   max_depth: number;
+  game_id: string | null;
+  fingerprint_version: number | null;
+  game_fingerprint: string | null;
+  preferred_analysis_run_id: string | null;
+  analysis_history: AnalysisHistoryEntry[];
+  persistence_warning: string | null;
+  metadata?: Record<string, string>;
+  metadata_sources?: Record<string, 'manual' | 'imported' | 'missing'>;
+  metadata_missing?: string[];
+  metadata_updated_at?: string | null;
+  source_headers?: Record<string, string>;
+  imported_metadata?: Record<string, string>;
+  metadata_overrides?: Record<string, string>;
+}
+
+export interface AnalysisHistoryEntry {
+  id: string;
+  game_id: string;
+  analysis_fingerprint: string;
+  created_at: string;
+  engine_depth: number;
+  request: AnalyzeRequest;
+  engine: Record<string, unknown>;
+  maia: Record<string, unknown>;
+  metric_schema_version: number;
 }
 
 export interface PositionEvalResult {
@@ -32,6 +57,7 @@ export interface AnalysisMoveResult {
   is_minefield: boolean;
   mbi_classification: string | null;
   mbi_maia_prob: number | null;
+  played_move_eval_drop?: number | null;
   eig_value: number | null;
   is_eig_flagged: boolean;
   is_brilliant: boolean;
@@ -45,10 +71,16 @@ export interface AnalysisMoveResult {
 export interface AnalyzeResult {
   moves: AnalysisMoveResult[];
   minefields: number[];
+  analysis_run_id?: string | null;
+  persistence_warning?: string | null;
+  game_id?: string | null;
+  cache_hit?: boolean;
+  analysis_history?: AnalysisHistoryEntry[];
 }
 
 export interface AnalyzeRequest {
   pgn: string;
+  game_id?: string | null;
   acceptable_drop: number;
   minefield_threshold: number;
   engine_depth: number;
@@ -72,6 +104,11 @@ export interface AnalysisCompleteEvent {
   type: 'complete';
   moves: AnalysisMoveResult[];
   minefields: number[];
+  analysis_run_id: string | null;
+  persistence_warning: string | null;
+  game_id: string | null;
+  cache_hit: boolean;
+  analysis_history: AnalysisHistoryEntry[];
 }
 
 export type AnalysisSSEEvent = AnalysisProgressEvent | AnalysisCompleteEvent;

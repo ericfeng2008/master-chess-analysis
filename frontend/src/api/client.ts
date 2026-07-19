@@ -3,22 +3,37 @@ import type { PositionEvalResult } from '../types'
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 type ApiErrorPayload = {
-  detail?: string
+  detail?: string | { message?: string; latest?: unknown }
+}
+
+export class ApiError extends Error {
+  status: number
+  payload: ApiErrorPayload
+
+  constructor(status: number, payload: ApiErrorPayload) {
+    const detail = payload.detail
+    super(typeof detail === 'string' ? detail : detail?.message ?? 'Request failed')
+    this.status = status
+    this.payload = payload
+  }
+}
+
+export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, init)
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({ detail: res.statusText }))) as ApiErrorPayload
+    throw new ApiError(res.status, payload)
+  }
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  return apiRequest<T>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-
-  if (!res.ok) {
-    const err = (await res.json().catch(() => ({ detail: res.statusText }))) as ApiErrorPayload
-    throw new Error(err.detail ?? 'Request failed')
-  }
-
-  return (await res.json()) as T
 }
 
 export async function apiPostForm<T>(path: string, formData: FormData): Promise<T> {
@@ -29,7 +44,7 @@ export async function apiPostForm<T>(path: string, formData: FormData): Promise<
 
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ detail: res.statusText }))) as ApiErrorPayload
-    throw new Error(err.detail ?? 'Request failed')
+    throw new ApiError(res.status, err)
   }
 
   return (await res.json()) as T
@@ -53,7 +68,7 @@ export function ssePost(
     .then(async (res) => {
       if (!res.ok) {
         const err = (await res.json().catch(() => ({ detail: res.statusText }))) as ApiErrorPayload
-        throw new Error(err.detail ?? 'Request failed')
+        throw new ApiError(res.status, err)
       }
 
       const reader = res.body?.getReader()
