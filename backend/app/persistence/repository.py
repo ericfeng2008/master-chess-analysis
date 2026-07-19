@@ -33,66 +33,127 @@ class AnalysisRepository:
 
     def upsert_game(self, pgn: str | ParsedPgn) -> dict[str, Any]:
         parsed = pgn if isinstance(pgn, ParsedPgn) else parse_single_game_pgn(pgn)
-        digest = game_fingerprint(parsed)
         now = utc_now()
         with self.database.transaction() as connection:
-            row = connection.execute(
-                "SELECT * FROM games WHERE game_fingerprint=?", (digest,)
-            ).fetchone()
-            if row is None:
-                game_id = str(uuid.uuid4())
-                connection.execute(
-                    """INSERT INTO games
-                       (id,fingerprint_version,game_fingerprint,canonical_initial_fen,
-                        mainline_uci_json,normalized_pgn,headers_json,move_count,
-                        created_at,updated_at,last_opened_at,imported_metadata_json,
-                        metadata_overrides_json,metadata_updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        game_id,
-                        GAME_FINGERPRINT_VERSION,
-                        digest,
-                        parsed.initial_fen,
-                        json_dumps(list(parsed.mainline_uci)),
-                        parsed.normalized_pgn,
-                        json_dumps(parsed.headers),
-                        parsed.move_count,
-                        now,
-                        now,
-                        now,
-                        json_dumps(merge_imported_metadata({}, parsed.headers)),
-                        "{}",
-                        now,
-                    ),
-                )
-            else:
-                game_id = str(row["id"])
-                imported = merge_imported_metadata(
-                    json_loads(row["imported_metadata_json"], {}), parsed.headers
-                )
-                connection.execute(
-                    """UPDATE games SET fingerprint_version=?,canonical_initial_fen=?,
-                       mainline_uci_json=?,normalized_pgn=?,headers_json=?,move_count=?,
-                       updated_at=?,last_opened_at=?,imported_metadata_json=?,
-                       metadata_updated_at=? WHERE id=?""",
-                    (
-                        GAME_FINGERPRINT_VERSION,
-                        parsed.initial_fen,
-                        json_dumps(list(parsed.mainline_uci)),
-                        parsed.normalized_pgn,
-                        json_dumps(parsed.headers),
-                        parsed.move_count,
-                        now,
-                        now,
-                        json_dumps(imported),
-                        now,
-                        game_id,
-                    ),
-                )
-        result = self.get_game(game_id)
-        if result is None:  # pragma: no cover - transaction invariant
-            raise RuntimeError("Persisted game could not be read")
+            result, _created = self._upsert_game_in_transaction(
+                connection, parsed, mark_opened=True, now=now
+            )
         return result
+
+    def upsert_games(self, parsed_games: list[ParsedPgn]) -> dict[str, Any]:
+        """Atomically persist each unique game and return truthful batch counts."""
+
+        if not parsed_games:
+            raise ValueError("At least one parsed game is required")
+
+        unique_games: list[ParsedPgn] = []
+        seen_fingerprints: set[str] = set()
+        for parsed in parsed_games:
+            digest = game_fingerprint(parsed)
+            if digest in seen_fingerprints:
+                continue
+            seen_fingerprints.add(digest)
+            unique_games.append(parsed)
+
+        now = utc_now()
+        stored_games: list[dict[str, Any]] = []
+        added = 0
+        existing = 0
+        with self.database.transaction() as connection:
+            for index, parsed in enumerate(unique_games):
+                stored, created = self._upsert_game_in_transaction(
+                    connection,
+                    parsed,
+                    mark_opened=index == 0,
+                    now=now,
+                )
+                stored_games.append(stored)
+                if created:
+                    added += 1
+                else:
+                    existing += 1
+
+        return {
+            "games": stored_games,
+            "num_games": len(parsed_games),
+            "num_unique_games": len(unique_games),
+            "num_games_added": added,
+            "num_games_existing": existing,
+            "num_duplicate_games": len(parsed_games) - len(unique_games),
+            "num_games_saved": len(unique_games),
+        }
+
+    def _upsert_game_in_transaction(
+        self,
+        connection,
+        parsed: ParsedPgn,
+        *,
+        mark_opened: bool,
+        now: str,
+    ) -> tuple[dict[str, Any], bool]:
+        digest = game_fingerprint(parsed)
+        row = connection.execute(
+            "SELECT * FROM games WHERE game_fingerprint=?", (digest,)
+        ).fetchone()
+        created = row is None
+        if created:
+            game_id = str(uuid.uuid4())
+            connection.execute(
+                """INSERT INTO games
+                   (id,fingerprint_version,game_fingerprint,canonical_initial_fen,
+                    mainline_uci_json,normalized_pgn,headers_json,move_count,
+                    created_at,updated_at,last_opened_at,imported_metadata_json,
+                    metadata_overrides_json,metadata_updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    game_id,
+                    GAME_FINGERPRINT_VERSION,
+                    digest,
+                    parsed.initial_fen,
+                    json_dumps(list(parsed.mainline_uci)),
+                    parsed.normalized_pgn,
+                    json_dumps(parsed.headers),
+                    parsed.move_count,
+                    now,
+                    now,
+                    now,
+                    json_dumps(merge_imported_metadata({}, parsed.headers)),
+                    "{}",
+                    now,
+                ),
+            )
+        else:
+            game_id = str(row["id"])
+            imported = merge_imported_metadata(
+                json_loads(row["imported_metadata_json"], {}), parsed.headers
+            )
+            last_opened_at = now if mark_opened else row["last_opened_at"]
+            connection.execute(
+                """UPDATE games SET fingerprint_version=?,canonical_initial_fen=?,
+                   mainline_uci_json=?,normalized_pgn=?,headers_json=?,move_count=?,
+                   updated_at=?,last_opened_at=?,imported_metadata_json=?,
+                   metadata_updated_at=? WHERE id=?""",
+                (
+                    GAME_FINGERPRINT_VERSION,
+                    parsed.initial_fen,
+                    json_dumps(list(parsed.mainline_uci)),
+                    parsed.normalized_pgn,
+                    json_dumps(parsed.headers),
+                    parsed.move_count,
+                    now,
+                    last_opened_at,
+                    json_dumps(imported),
+                    now,
+                    game_id,
+                ),
+            )
+
+        stored_row = connection.execute(
+            "SELECT * FROM games WHERE id=?", (game_id,)
+        ).fetchone()
+        if stored_row is None:  # pragma: no cover - transaction invariant
+            raise RuntimeError("Persisted game could not be read")
+        return self._game(stored_row), created
 
     def resolve_game(self, game_id: str | None, pgn: str) -> dict[str, Any]:
         parsed = parse_single_game_pgn(pgn)

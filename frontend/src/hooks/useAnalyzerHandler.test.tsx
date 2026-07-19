@@ -16,7 +16,9 @@ const history = [{
 }]
 
 const uploadResult = (overrides: Partial<PgnUploadResponse> = {}): PgnUploadResponse => ({
-  pgn: '[Event "Test"]\n\n1. e4 *', num_games: 1, num_variations: 0, max_depth: 1,
+  pgn: '[Event "Test"]\n\n1. e4 *', num_games: 1, num_unique_games: 1,
+  num_games_added: 1, num_games_existing: 0, num_duplicate_games: 0, num_games_saved: 1,
+  num_variations: 0, max_depth: 1,
   game_id: 'game-1', fingerprint_version: 1, game_fingerprint: 'game-fingerprint',
   preferred_analysis_run_id: 'run-1', analysis_history: history, persistence_warning: null,
   ...overrides,
@@ -34,7 +36,7 @@ function deps(overrides: Partial<AnalyzerHandlersDeps> = {}): AnalyzerHandlersDe
     engineDepth: 14, blunderThreshold: 1, mbiTrapThreshold: .4, mbiOutlierThreshold: .05,
     eigThreshold: 2, briThreshold: .05, maia3WhiteElo: 2200, maia3BlackElo: 2200,
     setPgn: vi.fn(), setGameId: vi.fn(), setAnalysisHistory: vi.fn(), setImportPersistenceWarning: vi.fn(),
-    clearAnalysis: vi.fn(), restoreImportedAnalysis: vi.fn(), setUploadSummary: vi.fn(), setUploadError: vi.fn(),
+    clearAnalysis: vi.fn(), restoreImportedAnalysis: vi.fn(), setUploadSummary: vi.fn(), setImportNotice: vi.fn(), setUploadError: vi.fn(),
     setUploading: vi.fn(), setUploadedFileName: vi.fn(), setShowConfig: vi.fn(), variationState: null,
     setVariationState: vi.fn(), ...overrides,
   }
@@ -58,14 +60,25 @@ describe('useAnalyzerHandler local analysis restoration', () => {
   })
 
   it('notifies game-level state and resets the file input after import', async () => {
-    api.upload.mockResolvedValue(uploadResult({ preferred_analysis_run_id: null }))
+    const response = uploadResult({
+      pgn: '[Event "First"]\n\n1. d4 *', num_games: 3, num_unique_games: 2,
+      num_games_added: 2, num_duplicate_games: 1, num_games_saved: 2,
+      preferred_analysis_run_id: null,
+    })
+    api.upload.mockResolvedValue(response)
     const onImportedGame = vi.fn()
     const values = deps({ onImportedGame })
     const { result } = renderHook(() => useAnalyzerHandler(values))
     const file = new File(['1. e4 *'], 'game.pgn')
     const target = { files: [file], value: '/fake/game.pgn' }
     await act(() => result.current.handleFile({ target } as unknown as ChangeEvent<HTMLInputElement>))
+    expect(values.clearAnalysis).toHaveBeenCalledTimes(1)
+    expect(values.setPgn).toHaveBeenCalledWith(response.pgn)
+    expect(values.setUploadSummary).toHaveBeenCalledWith(response)
+    expect(values.setImportNotice).toHaveBeenCalledWith(response)
+    expect(onImportedGame).toHaveBeenCalledTimes(1)
     expect(onImportedGame).toHaveBeenCalledWith(expect.objectContaining({ game_id: 'game-1' }))
+    expect(values.startAnalysis).not.toHaveBeenCalled()
     expect(target.value).toBe('')
   })
 
@@ -79,6 +92,7 @@ describe('useAnalyzerHandler local analysis restoration', () => {
     await act(() => result.current.handleFile({ target: { files: [file] } } as unknown as ChangeEvent<HTMLInputElement>))
     expect(values.restoreImportedAnalysis).not.toHaveBeenCalled()
     expect(values.setImportPersistenceWarning).toHaveBeenCalledWith('Not saved locally')
+    expect(values.setImportNotice).toHaveBeenCalledWith(expect.objectContaining({ persistence_warning: 'Not saved locally' }))
   })
 
   it('sends the logical game and current changed settings to analysis', () => {

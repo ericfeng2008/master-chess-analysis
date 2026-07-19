@@ -18,6 +18,15 @@ describe('useGameAnalysis stored-game restore',()=>{
     expect(result.current.result?.analysis_run_id).toBe('run-1')
     expect(result.current.selectedMoveIndex).toBe(0)
     expect(result.current.analysisMaia3WhiteElo).toBe(2400)
+    expect(result.current.analysisMaia3BlackElo).toBe(2350)
+  })
+
+  it('uses the historical 2200 context only for restored runs missing explicit Elo values',()=>{
+    const game={id:'legacy-run',game_id:'game-1',normalized_pgn:'*',headers:{},request:{},result:{moves:[],minefields:[]}} as unknown as StoredGame
+    const {result}=renderHook(()=>useGameAnalysis())
+    act(()=>result.current.restoreAnalysis(game))
+    expect(result.current.analysisMaia3WhiteElo).toBe(2200)
+    expect(result.current.analysisMaia3BlackElo).toBe(2200)
   })
 
   it('sends game identity and records an immediate compatible cache hit',()=>{

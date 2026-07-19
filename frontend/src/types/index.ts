@@ -1,6 +1,11 @@
 export interface PgnUploadResponse {
   pgn: string;
   num_games: number;
+  num_unique_games: number;
+  num_games_added: number;
+  num_games_existing: number;
+  num_duplicate_games: number;
+  num_games_saved: number;
   num_variations: number;
   max_depth: number;
   game_id: string | null;

@@ -16,7 +16,7 @@ import chess
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.analysis.metrics import compute_cti
-from app.config import MAIA3_CHECKPOINT_PATH, settings
+from app.config import DEFAULT_MAIA3_ELO, MAIA3_CHECKPOINT_PATH, settings
 from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 
@@ -134,7 +134,7 @@ def main():
     parser.add_argument("--stockfish", default=settings.stockfish_path)
     parser.add_argument("--checkpoint", default=MAIA3_CHECKPOINT_PATH)
     parser.add_argument("--depth", type=int, default=12)
-    parser.add_argument("--elo", type=int, default=2200)
+    parser.add_argument("--elo", type=int, default=DEFAULT_MAIA3_ELO)
     parser.add_argument("--minefield-threshold", type=float, default=0.8)
     asyncio.run(run(parser.parse_args()))
 

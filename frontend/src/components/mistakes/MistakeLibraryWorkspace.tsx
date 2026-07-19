@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Chess } from 'chess.js'
 
 import { getStoredGame } from '../../api/mistakes'
@@ -51,14 +51,23 @@ export function MistakeLibraryWorkspace({onBack,onOpenGame}:Props){
 
 function MistakeDetail({item,tags,saving,onClose,onOpenGame,onPractice,onSaveNote,onSaveTags,onLifecycle,onDelete}:{item:SavedMistake;tags:string[];saving:boolean;onClose:()=>void;onOpenGame:()=>void;onPractice:()=>void;onSaveNote:(value:string)=>void;onSaveTags:(values:string[])=>void;onLifecycle:()=>void;onDelete:()=>void}){
   const [note,setNote]=useState(item.note)
+  const [solutionRevealed,setSolutionRevealed]=useState(false)
+  const solutionRegionId=useId()
   return <aside className="mistake-detail" aria-label="Saved mistake detail">
     <div className="mistake-detail-head"><div><span>{gameTitle(item)}</span><h2>Move {item.move_number} · {item.side}</h2></div><button type="button" className="icon-button" aria-label="Close detail" onClick={onClose}>×</button></div>
     <div className="mistake-detail-board"><ChessBoard fen={item.decision_fen} orientation={item.side}/></div>
-    <div className="mistake-verdict"><span>Played<strong>{item.played_move}</strong></span><i>→</i><span>Best<strong>{item.best_move??'—'}</strong></span></div>
+    <section className="mistake-solution-card" aria-label="Mistake solution">
+      <div id={solutionRegionId} className="mistake-solution-ledger" role={solutionRevealed?'region':undefined} aria-label={solutionRevealed?'Best move and line':undefined}>
+        <div className="mistake-verdict"><span>Played<strong>{item.played_move}</strong></span><i aria-hidden="true">→</i><span>Best<strong className={solutionRevealed?undefined:'mistake-solution-hidden'}>{solutionRevealed?(item.best_move??'Best move unavailable'):'Hidden'}</strong></span></div>
+        <div className="mistake-solution-row">
+          <div className="mistake-line"><span>Best Line</span><p className={solutionRevealed?undefined:'mistake-solution-placeholder'}>{solutionRevealed?(item.evidence.best_line.join(' ')||'No stored line'):'Hidden until revealed'}</p></div>
+          <button type="button" className="primary-button mistake-solution-reveal" aria-expanded={solutionRevealed} aria-controls={solutionRegionId} onClick={()=>setSolutionRevealed(true)} disabled={solutionRevealed}>{solutionRevealed?'Best Move Revealed':'Reveal Best Move'}</button>
+        </div>
+      </div>
+    </section>
     <div className="mistake-evidence-grid"><div><strong>{pct(item.cti_lower_bound)}–{pct(item.cti_upper_bound)}</strong><span>CTI interval</span></div><div><strong>{item.objective_loss.toFixed(2)}</strong><span>pawn loss</span></div><div><strong>{item.mbi_maia_prob==null?'—':pct(item.mbi_maia_prob)}</strong><span>Maia likelihood</span></div><div><strong>{item.evidence.analysis_depth??'—'}</strong><span>analysis depth</span></div></div>
     <div className="mistake-system-reasons">{item.system_reasons.map(reason=><span key={reason}>{label(reason)}</span>)}</div>
     <p className="mistake-model-note">Maia likelihood is model-estimated for White {item.evidence.maia3_white_elo} / Black {item.evidence.maia3_black_elo} Elo.</p>
-    <div className="mistake-line"><span>Best line</span><p>{item.evidence.best_line.join(' ')||'No stored line'}</p></div>
     <label className="review-field"><span>Your note</span><textarea rows={3} value={note} onChange={event=>setNote(event.target.value)} onBlur={()=>{if(note!==item.note)onSaveNote(note)}} /></label>
     <TagEditor selected={item.tags} suggestions={tags} onChange={onSaveTags}/>
     <details><summary>Practice history ({item.practice_count})</summary><div className="mistake-attempt-history">{item.attempts?.length?item.attempts.map(attempt=><p key={attempt.id}><strong>{attempt.outcome}</strong><span>{attempt.chosen_move??'No move'} · {attempt.objective_acceptable?'acceptable':'not acceptable'} · {new Date(attempt.created_at).toLocaleDateString()}</span></p>):<p>No attempts yet.</p>}</div></details>

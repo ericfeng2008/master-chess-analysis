@@ -74,6 +74,7 @@ export interface AnalyzerHandlersDeps {
   clearAnalysis: () => void;
   restoreImportedAnalysis: (game: StoredGame) => void;
   setUploadSummary: (v: PgnUploadResponse | null) => void;
+  setImportNotice: (v: PgnUploadResponse | null) => void;
   setUploadError: (v: string | null) => void;
   setUploading: (v: boolean) => void;
   setUploadedFileName: (v: string | null) => void;
@@ -136,6 +137,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     clearAnalysis,
     restoreImportedAnalysis,
     setUploadSummary,
+    setImportNotice,
     setUploadError,
     setUploading,
     setUploadedFileName,
@@ -172,6 +174,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
 
     setUploadError(null);
     setUploadSummary(null);
+    setImportNotice(null);
     setUploadedFileName(file.name);
     setUploading(true);
 
@@ -181,6 +184,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
       const res = await apiPostForm<PgnUploadResponse>('/api/upload-pgn', form);
       clearAnalysis();
       setUploadSummary(res);
+      setImportNotice(res);
       setPgn(res.pgn);
       setGameId(res.game_id);
       setAnalysisHistory(res.analysis_history);

@@ -36,11 +36,11 @@ class FakeMaia3Client:
 
 
 class Maia3RuntimeTests(unittest.TestCase):
-    def test_analyze_request_defaults_maia3_elos_to_2200(self):
+    def test_analyze_request_defaults_maia3_elos_to_2600(self):
         request = AnalyzeRequest(pgn="1. e4 e5 *")
 
-        self.assertEqual(request.maia3_white_elo, 2200)
-        self.assertEqual(request.maia3_black_elo, 2200)
+        self.assertEqual(request.maia3_white_elo, 2600)
+        self.assertEqual(request.maia3_black_elo, 2600)
 
     def test_analyze_request_validates_maia3_elo_range(self):
         with self.assertRaises(ValidationError):

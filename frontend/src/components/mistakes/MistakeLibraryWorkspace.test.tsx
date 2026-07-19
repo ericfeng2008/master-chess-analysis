@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { savedMistake } from '../../test/mistakeFixtures'
@@ -36,6 +36,64 @@ describe('MistakeLibraryWorkspace',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Reveal without move'}))
     fireEvent.click(screen.getByRole('button',{name:'Reveal solution'}))
     expect(screen.getByText('Nxe5')).toBeInTheDocument()
+  })
+
+  it('conceals the best move and line until the compact solution control is activated',()=>{
+    detail=savedMistake()
+    render(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+
+    const solution=screen.getByLabelText('Mistake solution')
+    expect(within(solution).getByText('Nxe5')).toBeInTheDocument()
+    expect(within(solution).queryByText('Bb5')).not.toBeInTheDocument()
+    expect(within(solution).queryByText('Nf6')).not.toBeInTheDocument()
+    const reveal=within(solution).getByRole('button',{name:'Reveal Best Move'})
+    expect(reveal).toHaveAttribute('aria-expanded','false')
+
+    fireEvent.click(reveal)
+
+    expect(reveal).toHaveAttribute('aria-expanded','true')
+    const region=within(solution).getByRole('region',{name:'Best move and line'})
+    expect(within(region).getAllByText('Bb5')).not.toHaveLength(0)
+    expect(within(region).getByText('Bb5 Nf6')).toBeInTheDocument()
+    expect(solution.querySelector('.mistake-verdict')?.nextElementSibling).toHaveClass('mistake-solution-row')
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.saveTags).not.toHaveBeenCalled()
+    expect(mocks.assess).not.toHaveBeenCalled()
+  })
+
+  it('conceals the solution again when another detail is selected or reopened',()=>{
+    detail=savedMistake()
+    const view=render(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    fireEvent.click(screen.getByRole('button',{name:'Reveal Best Move'}))
+    expect(screen.getByText('Bb5 Nf6')).toBeInTheDocument()
+
+    const second=savedMistake({
+      id:'mistake-2',
+      best_move:'Qd2',
+      evidence:{...savedMistake().evidence,best_line:['Qd2','Qe7']},
+    })
+    detail=second
+    view.rerender(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    expect(screen.queryByText('Qd2')).not.toBeInTheDocument()
+    expect(screen.queryByText('Qd2 Qe7')).not.toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'Reveal Best Move'})).toHaveAttribute('aria-expanded','false')
+
+    detail=null
+    view.rerender(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    detail=second
+    view.rerender(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    expect(screen.queryByText('Qd2')).not.toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'Reveal Best Move'})).toHaveAttribute('aria-expanded','false')
+  })
+
+  it('shows explicit empty states only after revealing incomplete solution data',()=>{
+    detail=savedMistake({best_move:null,evidence:{...savedMistake().evidence,best_line:[]}})
+    render(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    expect(screen.queryByText('Best move unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('No stored line')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button',{name:'Reveal Best Move'}))
+    expect(screen.getByText('Best move unavailable')).toBeInTheDocument()
+    expect(screen.getByText('No stored line')).toBeInTheDocument()
   })
 
   it('shows editable tags, note, lifecycle, history, and full-game controls',()=>{

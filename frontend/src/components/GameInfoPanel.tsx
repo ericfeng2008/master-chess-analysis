@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 
+import { MAIA3_ELO_OPTIONS } from "../constants/maia3";
+
 type PgnHeaders = Record<string, string>;
 
 interface GameInfoPanelProps {
@@ -13,8 +15,6 @@ interface GameInfoPanelProps {
   onEditMetadata?: () => void;
   metadataEditingUnavailableReason?: string;
 }
-
-const MAIA3_ELO_OPTIONS = [2000, 2200, 2400, 2600];
 
 const TAG_DISPLAY_ORDER: Array<{ key: string; label: string }> = [
   { key: "Event", label: "Event" },
