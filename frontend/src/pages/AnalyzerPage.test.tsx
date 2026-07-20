@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AnalyzeResult, AnalysisMoveResult, PgnUploadResponse, PositionEvalResult } from "../types";
+import type { AnalyzeResult, AnalysisHistoryEntry, AnalysisMoveResult, PgnUploadResponse, PositionEvalResult } from "../types";
 import type { LogicalStoredGame, StoredGame, StoredGameSummary } from "../types/mistakes";
 import { bestLineFens } from "../utils/bestLineFens";
 import { AnalyzerPage } from "./AnalyzerPage";
@@ -145,7 +145,16 @@ vi.mock("../components/ChessBoard", () => ({
     <div data-testid="main-chessboard" data-orientation={orientation} />
   ),
 }));
-vi.mock("../components/ConfigurationPanel", () => ({ ConfigurationPanel: () => null }));
+vi.mock("../components/ConfigurationPanel", () => ({
+  ConfigurationPanel: ({ onOpenMistakes }: { onOpenMistakes?: () => void }) => (
+    <section className="configuration-panel panel">
+      <div className="panel-header">
+        <h3>Run Analysis</h3>
+        {onOpenMistakes && <button type="button" onClick={onOpenMistakes}>Save Mistakes</button>}
+      </div>
+    </section>
+  ),
+}));
 vi.mock("../components/GameInfoPanel", () => ({
   GameInfoPanel: ({
     maia3WhiteElo,
@@ -172,7 +181,15 @@ vi.mock("../components/MoveNavigator", () => ({
   ),
 }));
 vi.mock("../components/PgnViewer", () => ({ PgnViewer: () => null }));
-vi.mock("../components/PositionInfoPanel", () => ({ PositionInfoPanel: () => null }));
+vi.mock("../components/PositionInfoPanel", () => ({
+  PositionInfoPanel: () => (
+    <div className="panel">
+      <div className="panel-header">
+        <h3>Position Info</h3>
+      </div>
+    </div>
+  ),
+}));
 vi.mock("../components/SavedGameLibraryOverlay", () => ({
   SavedGameLibraryOverlay: ({
     refreshToken,
@@ -185,7 +202,9 @@ vi.mock("../components/SavedGameLibraryOverlay", () => ({
     return <output data-testid="library-refresh-token">{refreshToken}</output>;
   },
 }));
-vi.mock("../components/mistakes/MistakeCapturePanel", () => ({ MistakeCapturePanel: () => null }));
+vi.mock("../components/mistakes/MistakeCapturePanel", () => ({
+  MistakeCapturePanel: () => <div data-testid="mistake-capture">Mistake suggestions</div>,
+}));
 vi.mock("../components/mistakes/MistakeLibraryWorkspace", () => ({
   MistakeLibraryWorkspace: () => <div data-testid="mistake-library-secondary-board">Secondary chessboard</div>,
 }));
@@ -317,6 +336,39 @@ describe("AnalyzerPage evaluation bar integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mistake Library" }));
     expect(screen.getByTestId("mistake-library-secondary-board")).toBeInTheDocument();
     expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+  });
+
+  it("keeps Position Info standalone and opens Save Mistakes from the completed Run Analysis header", () => {
+    harness.game = makeGameState({ ...makeResult(), analysis_run_id: null });
+    const { rerender } = render(<AnalyzerPage />);
+
+    expect(screen.queryByRole("button", { name: "Save Mistakes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Position Info" })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Analysis detail view" })).not.toBeInTheDocument();
+
+    harness.game = makeGameState({
+      ...makeResult(),
+      analysis_run_id: "run-1",
+      analysis_history: [analysisHistoryEntry()],
+    });
+    rerender(<AnalyzerPage />);
+
+    const history = screen.getByRole("region", { name: "Saved analysis history" });
+    expect(history.closest(".board-column")).not.toBeNull();
+    expect(history.closest(".analysis-column")).toBeNull();
+    const timeline = screen.getByRole("heading", { name: "Evaluation Timeline" }).closest(".timeline-column");
+    expect(timeline).not.toBeNull();
+    expect(timeline?.closest(".workspace-grid")).not.toHaveAttribute("style");
+
+    const action = screen.getByRole("button", { name: "Save Mistakes" });
+    expect(action.closest(".configuration-panel .panel-header")).not.toBeNull();
+    fireEvent.click(action);
+
+    expect(screen.getByRole("dialog", { name: "Save Mistakes" })).toBeInTheDocument();
+    expect(screen.getByTestId("mistake-capture")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Position Info" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Save Mistakes" }));
+    expect(screen.queryByRole("dialog", { name: "Save Mistakes" })).not.toBeInTheDocument();
   });
 
   it("updates with mainline resulting-position evaluations and reorders segments on board flip", () => {
@@ -552,6 +604,20 @@ function makeResult(): AnalyzeResult {
   return {
     moves: [analysisMove(0.25, null), analysisMove(-1.75, null, ["d4"])],
     minefields: [],
+  };
+}
+
+function analysisHistoryEntry(): AnalysisHistoryEntry {
+  return {
+    id: "run-1",
+    game_id: "game-1",
+    analysis_fingerprint: "analysis-1",
+    created_at: "2026-07-19T12:00:00Z",
+    engine_depth: 18,
+    request: storedAnalysis(2600, 2600).request,
+    engine: { name: "Stockfish" },
+    maia: { model: "maia3-79m" },
+    metric_schema_version: 2,
   };
 }
 

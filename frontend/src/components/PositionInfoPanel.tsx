@@ -335,13 +335,6 @@ function formatCti(move: AnalysisMoveLike): string {
   if (move.cti === null) {
     return "N/A";
   }
-  if (
-    move.cti_is_approximate &&
-    move.cti_lower_bound != null &&
-    move.cti_upper_bound != null
-  ) {
-    return `≈${move.cti.toFixed(3)} (${move.cti_lower_bound.toFixed(3)}–${move.cti_upper_bound.toFixed(3)})`;
-  }
   return move.cti.toFixed(4);
 }
 

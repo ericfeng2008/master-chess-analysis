@@ -25,6 +25,7 @@ describe('SavedGameLibraryOverlay', () => {
   it('previews a saved game before the user explicitly opens it', () => {
     const open = vi.fn(); const close = vi.fn()
     render(<SavedGameLibraryOverlay open disabled={false} onClose={close} onOpenGame={open} onEditMetadata={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Open Saved Games' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Ada — Ben/i }))
     expect(library.setSelected).toHaveBeenCalled()
     expect(open).not.toHaveBeenCalled()
@@ -53,6 +54,17 @@ describe('SavedGameLibraryOverlay', () => {
     render(<SavedGameLibraryOverlay open disabled={false} openError="Saved game could not be loaded" onClose={vi.fn()} onOpenGame={vi.fn()} onEditMetadata={vi.fn()} />)
     expect(screen.getByRole('alert')).toHaveTextContent('Saved game could not be loaded')
     expect(screen.getAllByText('Not analyzed').length).toBeGreaterThan(0)
+  })
+
+  it('keeps the selected preview outside the scroll-owned game list', () => {
+    library.selected = game
+    render(<SavedGameLibraryOverlay open disabled={false} onClose={vi.fn()} onOpenGame={vi.fn()} onEditMetadata={vi.fn()} />)
+    const dialog = screen.getByRole('dialog', { name: 'Open Saved Games' })
+    const list = dialog.querySelector('.saved-game-list')
+    const preview = dialog.querySelector('.saved-game-preview')
+    expect(list).not.toBeNull()
+    expect(preview).not.toBeNull()
+    expect(list?.contains(preview)).toBe(false)
   })
 })
 

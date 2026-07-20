@@ -1,9 +1,9 @@
 export interface ChartDataPoint {
   index: number;
   label: string;
-  stockfish_eval: number;
-  evalPositive: number;
-  evalNegative: number;
+  stockfish_eval: number | null;
+  evalPositive: number | null;
+  evalNegative: number | null;
   ctiWhite: number | null;
   ctiBlack: number | null;
   ctiApproximate: boolean;
@@ -16,7 +16,8 @@ export interface ChartDataPoint {
   side: string;
   move_number: number;
   mate_in: number | null;
-  raw_eval: number;
+  raw_eval: number | null;
+  raw_epe: number | null;
 }
 
 export function CustomTooltip({
@@ -38,11 +39,13 @@ export function CustomTooltip({
       <p>
         Move {d.move_number} ({d.side}): <span className="mono">{d.move}</span>
       </p>
-      <p className="text-[var(--insight)]">Eval: {d.mate_in !== null ? `#${d.mate_in}` : d.raw_eval.toFixed(2)}</p>
+      <p className="text-[var(--insight)]">
+        Eval: {d.mate_in !== null ? `#${d.mate_in}` : d.raw_eval !== null ? d.raw_eval.toFixed(2) : "N/A"}
+      </p>
       <p style={{ color: d.side === "white" ? "var(--success)" : "var(--warning)" }}>
         CTI: {ctiValue !== null ? `${d.ctiApproximate ? "≈" : ""}${ctiValue.toFixed(d.ctiApproximate ? 3 : 4)}` : "N/A"}
       </p>
-      {d.epe !== null && <p className="text-[var(--violet)]">EPE: {d.epe.toFixed(2)}</p>}
+      {d.raw_epe !== null && <p className="text-[var(--violet)]">EPE: {d.raw_epe.toFixed(2)}</p>}
       {d.mbi_classification !== null && (
         <p className="text-[var(--violet)]">
           MBI: {d.mbi_classification === "cognitive_trap"
