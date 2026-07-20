@@ -10,12 +10,13 @@ interface Props {
   onStudySideChange: (side: StudySide) => void
   onJumpToMove: (ply: number) => void
   onOpenLibrary: () => void
+  showTitle?: boolean
 }
 
 const reasonLabel = (reason: string) => reason === 'high_cti_mistake' ? 'High-CTI mistake' : 'Human-natural blunder'
 const pct = (value: number | null) => value == null ? '—' : `${Math.round(value * 100)}%`
 
-export function MistakeCapturePanel({ analysisRunId, studySide, players, onStudySideChange, onJumpToMove, onOpenLibrary }: Props) {
+export function MistakeCapturePanel({ analysisRunId, studySide, players, onStudySideChange, onJumpToMove, onOpenLibrary, showTitle = true }: Props) {
   const [items,setItems]=useState<MistakeSuggestion[]>([])
   const [selected,setSelected]=useState<Set<number>>(new Set())
   const [loading,setLoading]=useState(true)
@@ -44,8 +45,8 @@ export function MistakeCapturePanel({ analysisRunId, studySide, players, onStudy
       setItems(refreshed.items);setSelected(new Set());setMessage(`${result.created.length} saved · ${result.existing.length} already in your library`)
     }catch(value){setError(value instanceof Error?value.message:String(value))}finally{setSaving(false)}
   }
-  return <section className="mistake-capture panel panel-radius" aria-labelledby="mistake-capture-title">
-    <div className="panel-header mistake-capture-head"><h3 className="section-title" id="mistake-capture-title">Keep only what matters</h3><div className="mistake-side-control"><small className="mistake-side-label">Mistake made by</small><div className="segment-control" aria-label="Mistake made by"><button type="button" className="segment-button" aria-pressed={studySide==='white'} data-active={studySide==='white'} title={players?.white} onClick={()=>onStudySideChange('white')}>White</button><button type="button" className="segment-button" aria-pressed={studySide==='black'} data-active={studySide==='black'} title={players?.black} onClick={()=>onStudySideChange('black')}>Black</button></div></div></div>
+  return <section className="mistake-capture panel panel-radius" aria-labelledby={showTitle?'mistake-capture-title':undefined} aria-label={showTitle?undefined:'Mistake suggestions'}>
+    <div className="panel-header mistake-capture-head">{showTitle&&<h3 className="section-title" id="mistake-capture-title">Save Mistakes</h3>}<div className="mistake-side-control"><small className="mistake-side-label">Mistake made by</small><div className="segment-control" aria-label="Mistake made by"><button type="button" className="segment-button" aria-pressed={studySide==='white'} data-active={studySide==='white'} title={players?.white} onClick={()=>onStudySideChange('white')}>White</button><button type="button" className="segment-button" aria-pressed={studySide==='black'} data-active={studySide==='black'} title={players?.black} onClick={()=>onStudySideChange('black')}>Black</button></div></div></div>
     <div className="mistake-capture-body"><h4>Mistakes to revisit</h4><p className="mistake-capture-intro">Review either player. Only objectively wrong moves from high-CTI positions and Maia3 cognitive traps are shown; you decide what enters practice.</p>
     {loading&&<p className="status-line" role="status">Reading the completed analysis…</p>}
     {error&&<div className="review-alert" role="alert">{error}</div>}
@@ -55,9 +56,9 @@ export function MistakeCapturePanel({ analysisRunId, studySide, players, onStudy
       <button type="button" className="mistake-suggestion-main" onClick={()=>onJumpToMove(item.ply)}><span>Move {item.move_number} · {item.side}</span><strong>{item.played_move} <i>instead of {item.best_move??'—'}</i></strong><small>{item.system_reasons.map(reasonLabel).join(' · ')}</small></button>
       <div className="mistake-mini-metrics"><span><b>{pct(item.cti_lower_bound)}</b>CTI floor</span><span><b>{item.objective_loss.toFixed(2)}</b>pawn loss</span>{item.mbi_maia_prob!=null&&<span><b>{pct(item.mbi_maia_prob)}</b>Maia likelihood</span>}</div>
     </article>)}</div>
-    <div className="mistake-capture-actions"><button type="button" className="primary-button" disabled={!selected.size||saving} onClick={()=>void save()}>{saving?'Saving locally…':`Save selected mistakes (${selected.size})`}</button><button type="button" className="text-button" onClick={onOpenLibrary}>Open Mistake Library</button></div>
     {message&&<p className="mistake-save-message" role="status">{message}</p>}
     {!loading&&unsaved.length>0&&<small>Maia likelihood is a model estimate for the selected Elo context, not an observed population percentage.</small>}
+    <div className="mistake-capture-actions"><button type="button" className="primary-button" disabled={!selected.size||saving} onClick={()=>void save()}>{saving?'Saving locally…':`Save selected mistakes (${selected.size})`}</button><button type="button" className="text-button" onClick={onOpenLibrary}>Open Mistake Library</button></div>
     </div>
   </section>
 }

@@ -1,6 +1,7 @@
 import { ProgressBar } from "./ProgressBar";
 
 interface ConfigurationPanelProps {
+  onOpenMistakes?: () => void;
   showConfig: boolean;
   setShowConfig: (v: boolean | ((prev: boolean) => boolean)) => void;
   engineDepth: number;
@@ -32,6 +33,7 @@ interface ConfigurationPanelProps {
 }
 
 export function ConfigurationPanel({
+  onOpenMistakes,
   showConfig,
   setShowConfig,
   engineDepth,
@@ -62,17 +64,21 @@ export function ConfigurationPanel({
   hasPgn,
 }: ConfigurationPanelProps) {
   return (
-    <div className="panel panel-radius panel-pad">
+    <div className="configuration-panel panel panel-radius panel-pad">
       <div className="panel-header">
         <div>
           <h3 className="section-title">Run Analysis</h3>
           <p className="status-line mt-1">
-            {hasPgn ? "Ready" : "PGN required"} · Engine depth {engineDepth}
+            {hasPgn ? "Ready" : "PGN required"} · Depth {engineDepth}
             {analysisMaia3WhiteElo !== null && analysisMaia3BlackElo !== null &&
-              ` · Maia3 W ${analysisMaia3WhiteElo} / B ${analysisMaia3BlackElo}`}
-            {!showConfig && " · Metric thresholds hidden"}
+              ` · Maia3 ${analysisMaia3WhiteElo}/${analysisMaia3BlackElo}`}
           </p>
         </div>
+        {onOpenMistakes && (
+          <button type="button" className="analysis-mistake-launch text-button" onClick={onOpenMistakes}>
+            Save Mistakes
+          </button>
+        )}
       </div>
 
       <div className="settings-summary">

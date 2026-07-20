@@ -39,8 +39,8 @@ export function SavedGameLibraryOverlay({ open, disabled, refreshToken, openErro
     library.setPage(1)
   }
 
-  return <div className="saved-game-dialog-backdrop" role="presentation"><section className="saved-game-library" role="dialog" aria-modal="true" aria-label="Saved games">
-    <header><div><span>Local game library</span><h2>Open saved game</h2></div><button type="button" className="icon-button" aria-label="Close saved games" onClick={onClose}>×</button></header>
+  return <div className="saved-game-dialog-backdrop" role="presentation"><section className="saved-game-library" role="dialog" aria-modal="true" aria-label="Open Saved Games">
+    <header><div><span>Local game library</span><h2>Open Saved Games</h2></div><button type="button" className="icon-button" aria-label="Close saved games" onClick={onClose}>×</button></header>
     <div className="saved-game-controls">
       <input aria-label="Search saved games" value={library.query} onChange={event => { library.setQuery(event.target.value); library.setPage(1) }} placeholder="Search tournament or player…" />
       <div className="segment-control" aria-label="Analysis state">{(['all','analyzed','not_analyzed'] as const).map(value => <button type="button" key={value} className="segment-button" data-active={library.analysisState === value} onClick={() => {library.setAnalysisState(value); library.setPage(1)}}>{value === 'all' ? 'All' : value === 'analyzed' ? 'Analyzed' : 'Not analyzed'}</button>)}</div>

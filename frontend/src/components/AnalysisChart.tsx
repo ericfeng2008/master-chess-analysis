@@ -12,31 +12,8 @@ import {
 } from "recharts";
 import { evalInverseTransform, evalTransform } from "./chartTransform";
 import { DiamondShape, SquareShape, StarShape, XMarkShape } from "./ChartMarkerShapes";
-import { CustomTooltip, type ChartDataPoint } from "./ChartTooltip";
-
-type AnalysisMoveLike = {
-  move_number: number;
-  side: string;
-  move: string;
-  fen: string;
-  stockfish_eval: number;
-  eval_after: number;
-  cti: number | null;
-  cti_is_approximate?: boolean;
-  best_move: string | null;
-  good_moves: string[];
-  good_moves_with_eval: Record<string, number>;
-  is_minefield: boolean;
-  mbi_classification: string | null;
-  mbi_maia_prob: number | null;
-  eig_value: number | null;
-  is_eig_flagged: boolean;
-  is_brilliant: boolean;
-  bri_maia_prob: number | null;
-  epe_score: number | null;
-  best_line: string[];
-  mate_in: number | null;
-};
+import { CustomTooltip } from "./ChartTooltip";
+import { buildAnalysisChartData, type AnalysisMoveLike } from "./analysisChartData";
 
 interface AnalysisChartProps {
   moves: AnalysisMoveLike[];
@@ -75,31 +52,12 @@ export function AnalysisChart({
   onSelectMove,
   perspective,
 }: AnalysisChartProps) {
-  const data: ChartDataPoint[] = moves.map((m, i) => {
-    const transformed = evalTransform(m.eval_after);
-    return {
-      index: i,
-      label: `${m.move_number}${m.side === "white" ? "." : "..."}`,
-      stockfish_eval: transformed,
-      evalPositive: Math.max(0, transformed),
-      evalNegative: Math.min(0, transformed),
-      ctiWhite: m.side === "white" ? m.cti : null,
-      ctiBlack: m.side === "black" ? m.cti : null,
-      ctiApproximate: m.cti_is_approximate ?? false,
-      epe: m.epe_score !== null ? evalTransform(m.epe_score) : null,
-      mbi_classification: m.mbi_classification,
-      mbi_maia_prob: m.mbi_maia_prob,
-      eig_value: m.eig_value,
-      is_eig_flagged: m.is_eig_flagged,
-      move: m.move,
-      side: m.side,
-      move_number: m.move_number,
-      mate_in: m.mate_in,
-      raw_eval: m.eval_after,
-    };
-  });
+  const data = buildAnalysisChartData(moves);
 
-  const maxTransformed = Math.max(3, ...data.map((d) => Math.abs(d.stockfish_eval)));
+  const finiteEvaluations = data.flatMap((point) =>
+    point.stockfish_eval === null ? [] : [Math.abs(point.stockfish_eval)],
+  );
+  const maxTransformed = Math.max(3, ...finiteEvaluations);
   const evalDomainBound = maxTransformed * 1.15;
   const evalDomain: [number, number] = [-evalDomainBound, evalDomainBound];
 
@@ -125,7 +83,7 @@ export function AnalysisChart({
       </div>
 
       <div className="min-w-0 flex-1">
-        <ResponsiveContainer width="100%" height={280}>
+        <ResponsiveContainer width="100%" height={240}>
           <ComposedChart
             data={data}
             margin={{ left: 0, right: 0 }}
@@ -190,7 +148,7 @@ export function AnalysisChart({
             />
             <Area
               yAxisId="eval"
-              type="monotone"
+              type="linear"
               dataKey="evalPositive"
               fill={CHART.evalPositive}
               stroke="none"
@@ -199,11 +157,22 @@ export function AnalysisChart({
             />
             <Area
               yAxisId="eval"
-              type="monotone"
+              type="linear"
               dataKey="evalNegative"
               fill={CHART.evalNegative}
               stroke="none"
               baseValue={0}
+              isAnimationActive={false}
+            />
+            <Line
+              yAxisId="eval"
+              type="linear"
+              dataKey="stockfish_eval"
+              stroke={CHART.evalNegative}
+              strokeWidth={1}
+              dot={false}
+              activeDot={false}
+              connectNulls={false}
               isAnimationActive={false}
             />
             <ReferenceLine yAxisId="eval" y={0} stroke={CHART.zero} strokeWidth={1} />
@@ -410,10 +379,14 @@ export function AnalysisChart({
               const d = data[selectedIndex];
               const isCtiSide = d.side === perspective;
               const ctiVal = d.side === "white" ? d.ctiWhite : d.ctiBlack;
+              const selectedY = isCtiSide ? (ctiVal ?? 0) : d.stockfish_eval;
+              if (selectedY === null) {
+                return null;
+              }
               return (
                 <ReferenceDot
                   x={d.label}
-                  y={isCtiSide ? (ctiVal ?? 0) : d.stockfish_eval}
+                  y={selectedY}
                   yAxisId={isCtiSide ? "cti" : "eval"}
                   r={8}
                   fill="none"

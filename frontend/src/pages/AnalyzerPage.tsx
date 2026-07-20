@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnalysisMistakeDialog } from "../components/AnalysisMistakeDialog";
 import { AnalysisChart } from "../components/AnalysisChart";
 import { AnalysisChartLegend } from "../components/AnalysisChartLegend";
 import { AnalysisHistoryPanel } from "../components/AnalysisHistoryPanel";
@@ -11,7 +12,6 @@ import { PgnViewer, type VariationData } from "../components/PgnViewer";
 import { PositionEvaluationBar } from "../components/PositionEvaluationBar";
 import { PositionInfoPanel } from "../components/PositionInfoPanel";
 import { PgnImportNotice } from "../components/PgnImportNotice";
-import { MistakeCapturePanel } from "../components/mistakes/MistakeCapturePanel";
 import { MistakeLibraryWorkspace } from "../components/mistakes/MistakeLibraryWorkspace";
 import { SavedGameLibraryOverlay } from "../components/SavedGameLibraryOverlay";
 import { DEFAULT_MAIA3_ELO, HISTORICAL_MAIA3_ELO } from "../constants/maia3";
@@ -72,6 +72,7 @@ export function AnalyzerPage() {
     return window.localStorage.getItem("masterprep-theme") === "dark" ? "dark" : "light";
   });
   const [applicationView, setApplicationView] = useState<ApplicationView>("analysis");
+  const [mistakeCaptureOpen, setMistakeCaptureOpen] = useState(false);
 
   const expireImportNotice = useCallback(() => setImportNotice(null), []);
 
@@ -301,13 +302,24 @@ export function AnalyzerPage() {
     }
 
     const updateHeight = () => {
-      setBoardColumnHeight(node.getBoundingClientRect().height);
+      const children = Array.from(node.children) as HTMLElement[];
+      const rowGap = Number.parseFloat(window.getComputedStyle(node).rowGap) || 0;
+      const contentHeight = children.reduce(
+        (height, child) => height + child.getBoundingClientRect().height,
+        rowGap * Math.max(0, children.length - 1),
+      );
+      setBoardColumnHeight(contentHeight);
     };
 
     updateHeight();
     const observer = new ResizeObserver(updateHeight);
+    const mutationObserver = new MutationObserver(updateHeight);
     observer.observe(node);
-    return () => observer.disconnect();
+    mutationObserver.observe(node, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      mutationObserver.disconnect();
+    };
   }, []);
 
   const boardFen =
@@ -494,6 +506,19 @@ export function AnalyzerPage() {
               )}
               <PgnImportNotice summary={importNotice} onExpire={expireImportNotice} />
             </div>
+
+            <AnalysisHistoryPanel
+              history={cti.result?.analysis_history ?? analysisHistory}
+              activeRunId={cti.result?.analysis_run_id ?? null}
+              cacheHit={Boolean(cti.result?.cache_hit)}
+              disabled={cti.isAnalyzing}
+              onSelect={(runId) => {
+                setUploadError(null);
+                void getAnalysisRun(runId)
+                  .then((run) => restoreStoredAnalysis(run))
+                  .catch((error: unknown) => setUploadError(error instanceof Error ? error.message : String(error)));
+              }}
+            />
           </aside>
 
           {cti.result && (
@@ -603,19 +628,8 @@ export function AnalyzerPage() {
           </main>
 
           <aside className="analysis-column">
-            <AnalysisHistoryPanel
-              history={cti.result?.analysis_history ?? analysisHistory}
-              activeRunId={cti.result?.analysis_run_id ?? null}
-              cacheHit={Boolean(cti.result?.cache_hit)}
-              disabled={cti.isAnalyzing}
-              onSelect={(runId) => {
-                setUploadError(null);
-                void getAnalysisRun(runId)
-                  .then((run) => restoreStoredAnalysis(run))
-                  .catch((error: unknown) => setUploadError(error instanceof Error ? error.message : String(error)));
-              }}
-            />
             <ConfigurationPanel
+              onOpenMistakes={cti.result?.analysis_run_id && !cti.isAnalyzing ? () => setMistakeCaptureOpen(true) : undefined}
               showConfig={showConfig}
               setShowConfig={setShowConfig}
               engineDepth={engineDepth}
@@ -646,16 +660,16 @@ export function AnalyzerPage() {
               hasPgn={!!pgn}
             />
 
-            <PositionInfoPanel
-              selectedMove={selectedMove}
-              exploration={exploration}
-              variationState={variationState}
-              varEvalCache={varEvalCache}
-              varEvalLoading={varEvalLoading}
-              ctiResult={cti.result}
-            />
-
-            {cti.result?.analysis_run_id && <MistakeCapturePanel analysisRunId={cti.result.analysis_run_id} studySide={perspective} players={{white:effectiveHeaders.White,black:effectiveHeaders.Black}} onStudySideChange={setPerspective} onJumpToMove={(ply) => { cti.selectMove(ply); nav.goTo(ply) }} onOpenLibrary={() => setApplicationView("mistake-library")} />}
+            {cti.result && (
+              <PositionInfoPanel
+                selectedMove={selectedMove}
+                exploration={exploration}
+                variationState={variationState}
+                varEvalCache={varEvalCache}
+                varEvalLoading={varEvalLoading}
+                ctiResult={cti.result}
+              />
+            )}
           </aside>
         </div>
       </div>
@@ -668,6 +682,19 @@ export function AnalyzerPage() {
           setSavedGameOpenError(error instanceof Error ? error.message : String(error));
         }
       }} />
+      <AnalysisMistakeDialog
+        open={mistakeCaptureOpen && Boolean(cti.result?.analysis_run_id)}
+        analysisRunId={cti.result?.analysis_run_id ?? ""}
+        studySide={perspective}
+        players={{ white: effectiveHeaders.White, black: effectiveHeaders.Black }}
+        onStudySideChange={setPerspective}
+        onJumpToMove={(ply) => { cti.selectMove(ply); nav.goTo(ply) }}
+        onOpenLibrary={() => {
+          setMistakeCaptureOpen(false);
+          setApplicationView("mistake-library");
+        }}
+        onClose={() => setMistakeCaptureOpen(false)}
+      />
       {metadataEditorGame && <GameMetadataEditor game={metadataEditorGame} onClose={() => setMetadataEditorGame(null)} onSaved={applyMetadata} />}
     </div>
   );
