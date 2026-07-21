@@ -32,7 +32,6 @@ const CHART = {
   selected: "var(--chart-selected)",
   ctiWhite: "var(--chart-cti-white)",
   ctiBlack: "var(--chart-cti-black)",
-  epe: "var(--chart-epe)",
   mineBest: "var(--chart-mine-best)",
   mineBestStroke: "var(--chart-mine-best-stroke)",
   mineGood: "var(--chart-mine-good)",
@@ -176,18 +175,6 @@ export function AnalysisChart({
               isAnimationActive={false}
             />
             <ReferenceLine yAxisId="eval" y={0} stroke={CHART.zero} strokeWidth={1} />
-
-            <Line
-              yAxisId="eval"
-              type="monotone"
-              dataKey="epe"
-              stroke={CHART.epe}
-              strokeDasharray="2 3"
-              strokeWidth={1.5}
-              dot={false}
-              connectNulls
-              isAnimationActive={false}
-            />
 
             <Tooltip content={<CustomTooltip />} defaultIndex={selectedIndex ?? undefined} />
 

@@ -65,8 +65,8 @@ describe("AnalysisChart Stockfish series", () => {
     expect(buildAnalysisChartData(restored)).toEqual(buildAnalysisChartData(fresh));
     expect(buildAnalysisChartData(restored)[1]).toMatchObject({
       raw_eval: -8,
-      raw_epe: 43.43,
     });
+    expect(buildAnalysisChartData(restored)[1]).not.toHaveProperty("raw_epe");
 
     const invalidRestored = [
       { ...move(0.8), eval_after: null },

@@ -4,9 +4,6 @@ Provides the core computation routines used by the analysis pipeline:
 - ``compute_cti``: Critical Tension Index -- measures how hard a position is
   for a human to play correctly by combining Stockfish multi-PV evaluation
   with Maia human-move-prediction probabilities.
-- ``compute_epe``: Expected Practical Evaluation -- 1-ply lookahead that
-  weights each candidate reply by its Maia probability to estimate what
-  evaluation can realistically be expected.
 - ``populate_eval_after``: Post-processing pass that fills in post-move evals
   and mate-in values using the ``eval_after[i] = stockfish_eval[i+1]`` convention.
 """
@@ -23,9 +20,8 @@ from app.analysis.data_models import (
     CTI_POLICY_COVERAGE,
     MIN_ANALYSIS_DEPTH,
     PROBE_DEPTH,
-    EPE_CUMULATIVE_CUTOFF,
-    EPE_MAX_MOVES,
 )
+from app.analysis.diagnostics import diagnostic_stage
 from app.analysis.evaluation import terminal_eval_white
 
 
@@ -115,123 +111,6 @@ def _select_depth(eval_estimate: float, full_depth: int) -> int:
         return full_depth
 
 
-# EPE: Expected Practical Evaluation
-
-def compute_epe(
-    board_after_move: chess.Board,
-    stockfish: StockfishClient,
-    maia: Maia3Client,
-    maia_policy_cache: MaiaPolicyCache | None = None,
-    maia3_white_elo: int = DEFAULT_MAIA3_ELO,
-    maia3_black_elo: int = DEFAULT_MAIA3_ELO,
-    history_fens: Sequence[str] | None = None,
-) -> float | None:
-    """Compute the Expected Practical Evaluation for a position.
-
-    EPE performs a 1-ply lookahead from the given position: it asks Maia
-    which moves a human would most likely play, evaluates each with
-    Stockfish, and returns the probability-weighted average evaluation.
-
-    The intuition is: "Given that the opponent is human (not an engine),
-    what evaluation can we realistically expect after their reply?"
-
-    Move-selection:
-      Candidate moves are taken from Maia's policy in descending
-      probability order. Selection stops when either:
-      - Cumulative probability reaches EPE_CUMULATIVE_CUTOFF (0.95), or
-      - EPE_MAX_MOVES (5) candidates have been collected.
-
-    Residual-probability:
-      Any probability mass not covered by selected moves is assigned
-      the worst-case eval among the selected moves. This is conservative:
-      if 5% of the time the opponent plays an unknown move, we assume
-      it's as bad (for the opponent) as the worst selected move.
-
-    "Worst-case" direction depends on side-to-move: for White, the
-    worst eval is the minimum; for Black, the worst eval is the maximum
-    (since evals are from White's perspective).
-
-    All evaluations are normalized to White's perspective.
-
-    Args:
-        board_after_move: The position to evaluate (after a move has been played).
-        stockfish: Stockfish engine client.
-        maia: Maia engine client for human move prediction.
-
-    Returns:
-        The EPE score (from White's perspective), or None if the position
-        should be skipped.
-    """
-    if board_after_move.is_game_over():
-        return None
-
-    # Get Maia's prediction of what a human would play here
-    policy = _predict_maia(
-        board_after_move,
-        maia,
-        maia_policy_cache,
-        maia3_white_elo=maia3_white_elo,
-        maia3_black_elo=maia3_black_elo,
-        history_fens=history_fens,
-    )
-    if not policy:
-        return None
-
-    # ----- Select candidate moves by descending Maia-probability -----
-    sorted_moves = sorted(policy.items(), key=lambda x: x[1], reverse=True)
-    selected: list[tuple[chess.Move, float]] = []
-    cumulative = 0.0
-    for move, prob in sorted_moves:
-        if len(selected) >= EPE_MAX_MOVES:
-            break
-        selected.append((move, prob))
-        cumulative += prob
-        # Stop once we cover enough of the probability mass
-        if cumulative >= EPE_CUMULATIVE_CUTOFF:
-            break
-
-    if not selected:
-        return None
-
-    # ----- Evaluate each candidate move with Stockfish -----
-    evals: list[tuple[float, float]] = []  # (probability, white_eval) pairs
-    for move, prob in selected:
-        temp_board = board_after_move.copy()
-        temp_board.push(move)
-
-        terminal_eval = terminal_eval_white(temp_board)
-        if terminal_eval is not None:
-            white_eval = terminal_eval
-        else:
-            # Stockfish returns eval from side-to-move perspective;
-            # negate for Black so all evals are from White's perspective.
-            stm_eval = stockfish.quick_evaluate(temp_board)
-            white_eval = stm_eval if temp_board.turn == chess.WHITE else -stm_eval
-
-        evals.append((prob, white_eval))
-
-    # ----- Handle residual probability (unselected moves) -----
-    selected_prob = sum(prob for prob, _ in evals)
-    residual_prob = max(0.0, 1.0 - selected_prob)
-
-    # Worst-case eval direction depends on who is to move:
-    # White to move: worst-case is the lowest eval (opponent minimizing)
-    # Black to move: worst-case is the highest eval (opponent maximizing)
-    is_white_to_move = board_after_move.turn == chess.WHITE
-    if is_white_to_move:
-        worst_eval = min(ev for _, ev in evals)
-    else:
-        worst_eval = max(ev for _, ev in evals)
-
-    # ----- Compute probability-weighted average -----
-    weighted_sum = sum(prob * ev for prob, ev in evals)
-    if residual_prob > 0:
-        # Assign residual mass to worst-case eval (conservative estimate)
-        weighted_sum += residual_prob * worst_eval
-
-    return round(weighted_sum, 2)
-
-
 # CTI: Critical Tension Index
 
 def compute_cti(
@@ -303,14 +182,15 @@ def compute_cti(
     # ----- Depth triage: reduce depth for lopsided positions -----
     analysis_depth = _select_depth(eval_estimate, full_depth)
 
-    policy = _predict_maia(
-        board,
-        maia,
-        maia_policy_cache,
-        maia3_white_elo=maia3_white_elo,
-        maia3_black_elo=maia3_black_elo,
-        history_fens=history_fens,
-    )
+    with diagnostic_stage("maia_inference"):
+        policy = _predict_maia(
+            board,
+            maia,
+            maia_policy_cache,
+            maia3_white_elo=maia3_white_elo,
+            maia3_black_elo=maia3_black_elo,
+            history_fens=history_fens,
+        )
     if not policy:
         return None
 
@@ -322,7 +202,8 @@ def compute_cti(
     if not sorted_policy:
         return None
 
-    best_result = stockfish.evaluate_best_move(board, depth=analysis_depth)
+    with diagnostic_stage("cti_best"):
+        best_result = stockfish.evaluate_best_move(board, depth=analysis_depth)
     if best_result is None:
         return None
     best_move_obj, best_eval, best_pv, best_mate = best_result
@@ -348,16 +229,18 @@ def compute_cti(
 
     def evaluate_candidates(
         moves: Sequence[chess.Move],
+        stage: str,
     ) -> dict[chess.Move, tuple[float, list[chess.Move], int | None]]:
-        results = stockfish.evaluate_root_moves(board, list(moves), depth=analysis_depth)
-        # UCI engines should return every requested root. Preserve a complete
-        # uncertainty accounting even if an individual MultiPV line is absent.
-        for missing in moves:
-            if missing not in results:
-                results[missing] = stockfish.evaluate_move(board, missing, depth=analysis_depth)
+        with diagnostic_stage(stage):
+            results = stockfish.evaluate_root_moves(board, list(moves), depth=analysis_depth)
+            # UCI engines should return every requested root. Preserve a complete
+            # uncertainty accounting even if an individual MultiPV line is absent.
+            for missing in moves:
+                if missing not in results:
+                    results[missing] = stockfish.evaluate_move(board, missing, depth=analysis_depth)
         return results
 
-    evaluated = evaluate_candidates(candidate_moves)
+    evaluated = evaluate_candidates(candidate_moves, "cti_candidates")
     # Preserve the unrestricted best search as the objective baseline and PV.
     evaluated[best_move_obj] = (best_eval, best_pv, best_mate)
 
@@ -383,7 +266,7 @@ def compute_cti(
         while lower_bound < minefield_threshold <= upper_bound and remaining_moves:
             batch = remaining_moves[:3]
             remaining_moves = remaining_moves[3:]
-            new_results = evaluate_candidates(batch)
+            new_results = evaluate_candidates(batch, "cti_refinement")
             evaluated.update(new_results)
             good_moves, lower_bound, upper_bound, remaining_mass, cti = summarize()
 

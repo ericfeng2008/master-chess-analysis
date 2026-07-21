@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.analysis.data_models import AnalysisCompleteEvent
 from app.mistakes import MistakeRepository
@@ -31,6 +33,15 @@ class FakeStockfish:
             "depth": self.depth,
             "threads": 1,
             "hash_mb": 16,
+        }
+
+    def evaluate_position(self, board, depth=12, acceptable_drop=0.5):
+        return {
+            "eval": 0.25,
+            "best_move": "e4",
+            "good_moves": ["e4"],
+            "good_moves_with_eval": {"e4": 0.0},
+            "mate_in": None,
         }
 
 
@@ -78,9 +89,15 @@ def upload(client: TestClient, pgn: str = PGN):
 
 def complete_event(response) -> dict:
     chunks = [line for line in response.text.splitlines() if line.startswith("data: ")]
-    import json
-
     return json.loads(chunks[-1][6:])
+
+
+def workload_logs(caplog):
+    return [
+        json.loads(record.message)
+        for record in caplog.records
+        if '"event": "analysis_workload"' in record.message
+    ]
 
 
 def test_upload_persists_reuses_and_accepts_multiple_games(tmp_path):
@@ -331,3 +348,52 @@ def test_metadata_edit_preserves_exact_cached_analysis(tmp_path):
     assert cached["cache_hit"] is True
     assert cached["analysis_run_id"] == run_id
     assert app.state.stockfish_lock.entries == 0
+
+
+def test_cached_and_lazy_requests_emit_safe_structured_workload_logs(tmp_path, caplog):
+    caplog.set_level("INFO", logger="app.analysis.workload")
+    app, repository = make_app(tmp_path)
+    client = TestClient(app)
+    imported = upload(client).json()
+    request = AnalyzeRequest(pgn=imported["pgn"], game_id=imported["game_id"])
+    repository.create_analysis_run(build_analysis_snapshot(
+        imported["pgn"], request=request.model_dump(), engine=app.state.stockfish.identity,
+        maia={"model": "maia3-79m", "checkpoint": "model.pt", "device": "cpu", "use_history": True},
+        moves=[], minefields=[], game_id=imported["game_id"],
+    ))
+
+    assert complete_event(client.post("/api/analyze", json=request.model_dump()))["cache_hit"] is True
+    lazy = client.post(
+        "/api/evaluate-position",
+        json={"fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "depth": 10, "purpose": "variation_detail"},
+    )
+    assert lazy.status_code == 200
+
+    logs = workload_logs(caplog)
+    assert [entry["request_kind"] for entry in logs[-2:]] == [
+        "cached_analysis", "lazy_variation_detail"
+    ]
+    assert all(entry["status"] == "complete" for entry in logs[-2:])
+    assert all("pgn" not in json.dumps(entry).lower() for entry in logs[-2:])
+
+
+def test_lazy_request_failure_emits_one_failure_summary(tmp_path, caplog, monkeypatch):
+    caplog.set_level("INFO", logger="app.analysis.workload")
+    app, _repository = make_app(tmp_path)
+    client = TestClient(app)
+    monkeypatch.setattr(
+        app.state.stockfish,
+        "evaluate_position",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("engine unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="engine unavailable"):
+        client.post(
+            "/api/evaluate-position",
+            json={"fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "depth": 10, "purpose": "variation_detail"},
+        )
+
+    failures = [entry for entry in workload_logs(caplog) if entry["status"] == "failure"]
+    assert len(failures) == 1
+    assert failures[0]["request_kind"] == "lazy_variation_detail"
+    assert failures[0]["error_type"] == "RuntimeError"

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     default_engine_depth: int = 12
     stockfish_threads: int = 0  # 0 = auto-detect (cpu_count - 1)
     stockfish_hash_mb: int = 256
+    stockfish_search_cache_entries: int = 2048
     data_dir: str = str(BACKEND_DIR / "data")
 
     @property

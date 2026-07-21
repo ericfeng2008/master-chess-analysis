@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
         depth=settings.default_engine_depth,
         threads=settings.stockfish_threads,
         hash_mb=settings.stockfish_hash_mb,
+        search_cache_entries=settings.stockfish_search_cache_entries,
     )
     app.state.maia = await Maia3Client.create(
         checkpoint_path=MAIA3_CHECKPOINT_PATH,

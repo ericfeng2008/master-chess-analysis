@@ -3,6 +3,7 @@ from dataclasses import replace
 from app.persistence.provenance import (
     ANALYSIS_FINGERPRINT_VERSION,
     GAME_FINGERPRINT_VERSION,
+    METRIC_SCHEMA_VERSION,
     PgnValidationError,
     analysis_fingerprint,
     build_analysis_snapshot,
@@ -168,6 +169,17 @@ def test_analysis_fingerprint_ignores_incidental_fields_but_covers_inputs():
     assert base != analysis_fingerprint(digest, {**request, "engine_depth": 18}, engine, maia)
     assert base != analysis_fingerprint(digest, request, engine, {**maia, "checkpoint": "new.pt"})
     assert base != analysis_fingerprint(digest, request, engine, maia, metric_schema_version=99)
+
+
+def test_metric_schema_three_invalidates_pre_optimization_workload():
+    digest = game_fingerprint(parse_single_game_pgn(PGN_A))
+    request = {"engine_depth": 18}
+    engine = {"name": "Stockfish"}
+    maia = {"model": "maia3-79m"}
+    assert METRIC_SCHEMA_VERSION == 3
+    assert analysis_fingerprint(digest, request, engine, maia) != analysis_fingerprint(
+        digest, request, engine, maia, metric_schema_version=2
+    )
 
 
 def test_mistake_fingerprint_is_cross_run_stable_and_game_scoped():

@@ -5,8 +5,7 @@ Contains the dataclass definitions used throughout the analysis system:
 - AnalysisMoveData: Full per-move analysis result with all metrics
 - AnalysisProgressEvent / AnalysisCompleteEvent: SSE streaming event payloads
 
-Also defines tuning constants that control depth selection, position
-skipping, and EPE move selection.
+Also defines tuning constants that control depth selection and position skipping.
 """
 
 from dataclasses import dataclass
@@ -23,22 +22,6 @@ PROBE_DEPTH = 8
 # Floor for analysis depth. Even heavily lopsided positions get at least this depth
 # so that move ordering and PV extraction remain reliable.
 MIN_ANALYSIS_DEPTH = 10
-
-# Positions where |eval| >= this threshold (in pawns) are considered fully decided.
-# EPE computation is skipped for these; the raw eval is used instead.
-SKIP_EVAL_THRESHOLD = 8.0
-
-# --------------------------------------------------------------------
-# EPE (Expected Practical Evaluation) move-selection constants
-# --------------------------------------------------------------------
-
-# Stop adding candidate moves once cumulative Maia probability reaches this fraction.
-# Ensures we cover the vast majority of what a human would realistically play.
-EPE_CUMULATIVE_CUTOFF = 0.95
-
-# Hard cap on the number of candidate moves considered for EPE, even if
-# the cumulative probability hasn't reached the cutoff yet.
-EPE_MAX_MOVES = 5
 
 # CTI evaluates the smallest Maia-probability prefix that reaches this target.
 # Any unevaluated tail becomes an explicit uncertainty interval.
@@ -84,7 +67,7 @@ class CTIResult:
 class AnalysisMoveData:
     """Complete analysis result for a single move in the game.
 
-    Combines all computed metrics (CTI, MBI, EIG, BRI, EPE) and supporting
+    Combines all computed metrics (CTI, MBI, EIG, BRI) and supporting
     data into one record. One instance is produced per half-move (ply).
 
     Attributes:
@@ -115,11 +98,10 @@ class AnalysisMoveData:
             Maia assigns it very low probability (< bri_threshold).
         bri_maia_prob: Maia probability of the played move when it is the best
             move, or None if the played move wasn't the best.
-        epe_score: Expected Practical Evaluation -- probability-weighted eval
-            over the most likely human replies (1-ply lookahead).
+        epe_score: Deprecated nullable compatibility field for historical runs.
         best_line: Stockfish principal variation (up to 6 moves) in SAN.
-        best_line_evals: Pre-computed evaluation data for each position in
-            best_line, keyed by FEN. Each value is a dict with:
+        best_line_evals: Historical compatibility map keyed by FEN. New runs
+            leave it empty and load details lazily. Historical values contain:
             eval (White's perspective), best_move (SAN),
             good_moves (SAN list), good_moves_with_eval (diff dict),
             mate_in (int or None). Enables instant display of

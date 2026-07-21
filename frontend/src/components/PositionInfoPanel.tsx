@@ -321,12 +321,6 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
           )}
         </div>
       )}
-      {s.epe_score !== null && (
-        <div className="col-span-2">
-          <span className="metric-label">EPE:</span>{" "}
-          <span className="text-[var(--violet)]">{s.epe_score.toFixed(2)}</span>
-        </div>
-      )}
     </div>
   );
 }
