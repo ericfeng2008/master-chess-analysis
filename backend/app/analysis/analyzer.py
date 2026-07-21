@@ -6,7 +6,6 @@ metrics for each move:
 - MBI (Master Blunder Index) -- classifies blunders by Maia probability
 - EIG (Engine-Intuition Gap) -- divergence between engine and human top-choice
 - BRI (Brilliancy Score) -- engine-best moves that humans rarely find
-- EPE (Expected Practical Evaluation) -- probability-weighted 1-ply lookahead
 
 Results are streamed as Server-Sent Events: periodic AnalysisProgressEvent
 updates during processing, and a final AnalysisCompleteEvent with the
@@ -24,9 +23,9 @@ from app.analysis.data_models import (
     AnalysisCompleteEvent,
     AnalysisMoveData,
     AnalysisProgressEvent,
-    SKIP_EVAL_THRESHOLD,
 )
-from app.analysis.metrics import MaiaPolicyCache, compute_cti, compute_epe, populate_eval_after
+from app.analysis.diagnostics import diagnostic_stage
+from app.analysis.metrics import MaiaPolicyCache, compute_cti, populate_eval_after
 from app.analysis.evaluation import terminal_eval_white
 from app.pgn_utils import normalize_pgn_for_python_chess
 
@@ -48,10 +47,10 @@ def analyze_game(
     """Analyze every position in a PGN game, yielding SSE-streaming events.
 
     Walks through the mainline of the game move-by-move. For each position,
-    computes CTI (via ``compute_cti``), then derives MBI, EIG, BRI, and EPE
+    computes CTI (via ``compute_cti``), then derives MBI, EIG, and BRI
     from the CTI result's engine evals and Maia policy. Positions that are
-    heavily lopsided (|eval| >= SKIP_EVAL_THRESHOLD) get a lightweight
-    pass with no full analysis.
+    Positions with forced moves, terminal states, or tablebase-sized material
+    get a lightweight pass with no full CTI analysis.
 
     Progress events are emitted every 5 moves and on the last move. A final
     complete event carries the full results list and minefield indices.
@@ -117,8 +116,7 @@ def analyze_game(
     # Mate-in-N values (side-to-move perspective) for the post-processing pass
     mate_stm_per_pos: list[int | None] = []
 
-    # Reuse Maia policy calls across CTI and EPE. The post-move board used by
-    # EPE is commonly the next loop iteration's pre-move board.
+    # Reuse Maia policy calls across positions within this analysis.
     maia_policy_cache: MaiaPolicyCache = {}
 
     for idx, (board, move, move_number, side, position_history_fens) in enumerate(positions):
@@ -235,29 +233,9 @@ def analyze_game(
                 if played_maia_prob < bri_threshold:
                     is_brilliant = True
 
-            # ----- EPE: Expected Practical Evaluation -----
-            # For heavily lopsided positions, skip the expensive 1-ply
-            # lookahead and just use the raw eval (result is obvious).
-            board_after = board.copy()
-            board_after.push(move)
-            post_move_history_fens = (*position_history_fens, board_after.fen())
-            if abs(white_eval) >= SKIP_EVAL_THRESHOLD:
-                epe_score = round(white_eval, 2)
-            else:
-                epe_score = compute_epe(
-                    board_after,
-                    stockfish,
-                    maia,
-                    maia_policy_cache=maia_policy_cache,
-                    maia3_white_elo=maia3_white_elo,
-                    maia3_black_elo=maia3_black_elo,
-                    history_fens=post_move_history_fens,
-                )
-
             # Convert PV moves to SAN notation, stopping at 6 moves or
             # if a move is no-longer legal (can happen with hash collisions).
             best_line: list[str] = []
-            best_line_evals: dict[str, dict] = {}
             pv_board = board.copy()
             for pv_move in result.best_pv[:6]:
                 if pv_move in pv_board.legal_moves:
@@ -266,82 +244,35 @@ def analyze_game(
                 else:
                     break
 
-            # Pre-compute evals for each variation position so the UI can
-            # display variation info instantly without on-demand API calls.
-            # We use cheap shallow searches here to avoid slowing down batch analysis:
-            # - Post-move quick_evaluate (depth 10) for eval + mate in
-            # - Pre-move evaluate_position at reduced depth (10) for best_move/good_moves context
-            VARIATION_EVAL_DEPTH = 10
-            var_board = board.copy()
-            for _vi, pv_move in enumerate(result.best_pv[: len(best_line)]):
-                pre_board = var_board.copy()
-                var_board.push(pv_move)
-                post_fen = var_board.fen()
-
-                if var_board.is_game_over():
-                    terminal_eval = terminal_eval_white(var_board)
-                    best_line_evals[post_fen] = {
-                        "eval": terminal_eval if terminal_eval is not None else 0.0,
-                        "best_move": "",
-                        "good_moves": [],
-                        "good_moves_with_eval": {},
-                        "mate_in": None,
-                    }
-                    continue
-
-                # Cheap post-move eval (single PV, low-depth)
-                post_eval, post_mate = stockfish.quick_evaluate_with_mate(
-                    var_board, depth=VARIATION_EVAL_DEPTH
+            with diagnostic_stage("result_finalization"):
+                move_data = AnalysisMoveData(
+                    move_number=move_number,
+                    side=side,
+                    move=board.san(move),
+                    fen=board.fen(),
+                    stockfish_eval=round(white_eval, 2),
+                    eval_after=0.0,  # populated in post-processing pass
+                    cti=result.cti,
+                    cti_lower_bound=result.cti_lower_bound,
+                    cti_upper_bound=result.cti_upper_bound,
+                    cti_remaining_mass=result.cti_remaining_mass,
+                    cti_is_approximate=result.cti_is_approximate,
+                    best_move=board.san(best_move_obj),
+                    good_moves=[board.san(m) for m in result.good_moves],
+                    good_moves_with_eval=good_moves_eval,
+                    is_minefield=is_minefield,
+                    mbi_classification=mbi_classification,
+                    mbi_maia_prob=mbi_maia_prob,
+                    eig_value=eig_value,
+                    is_eig_flagged=is_eig_flagged,
+                    is_brilliant=is_brilliant,
+                    bri_maia_prob=bri_maia_prob,
+                    epe_score=None,
+                    best_line=best_line,
+                    best_line_evals={},
+                    mate_in=None,  # populated in post-processing pass
+                    played_move_eval_drop=round(max(0.0, eval_drop), 4),
                 )
-                is_white_to_move = var_board.turn == chess.WHITE
-                white_post_eval = post_eval if is_white_to_move else -post_eval
-                white_post_mate = (
-                    post_mate if is_white_to_move else -post_mate
-                    if post_mate is not None else None
-                )
-
-                # Pre-move eval at reduced depth for best_move/good_moves
-                pre_result = stockfish.evaluate_position(
-                    pre_board, depth=VARIATION_EVAL_DEPTH,
-                    acceptable_drop=acceptable_drop,
-                )
-
-                best_line_evals[post_fen] = {
-                    "eval": round(white_post_eval, 2),
-                    "best_move": pre_result["best_move"],
-                    "good_moves": pre_result["good_moves"],
-                    "good_moves_with_eval": pre_result["good_moves_with_eval"],
-                    "mate_in": white_post_mate,
-                }
-
-            move_data = AnalysisMoveData(
-                move_number=move_number,
-                side=side,
-                move=board.san(move),
-                fen=board.fen(),
-                stockfish_eval=round(white_eval, 2),
-                eval_after=0.0,  # populated in post-processing pass
-                cti=result.cti,
-                cti_lower_bound=result.cti_lower_bound,
-                cti_upper_bound=result.cti_upper_bound,
-                cti_remaining_mass=result.cti_remaining_mass,
-                cti_is_approximate=result.cti_is_approximate,
-                best_move=board.san(best_move_obj),
-                good_moves=[board.san(m) for m in result.good_moves],
-                good_moves_with_eval=good_moves_eval,
-                is_minefield=is_minefield,
-                mbi_classification=mbi_classification,
-                mbi_maia_prob=mbi_maia_prob,
-                eig_value=eig_value,
-                is_eig_flagged=is_eig_flagged,
-                is_brilliant=is_brilliant,
-                bri_maia_prob=bri_maia_prob,
-                epe_score=epe_score,
-                best_line=best_line,
-                best_line_evals=best_line_evals,
-                mate_in=None,  # populated in post-processing pass
-                played_move_eval_drop=round(max(0.0, eval_drop), 4),
-            )
             mate_stm_per_pos.append(stm_mate)
         else:
             # ----- Skipped position -----
@@ -409,6 +340,7 @@ def analyze_game(
     # eval_after[i] = stockfish_eval[i+1] (Lichess convention).
     # The last move's eval_after requires a separate Stockfish evaluation
     # of the final position.
-    populate_eval_after(move_results, mate_stm_per_pos, positions, stockfish)
+    with diagnostic_stage("result_finalization"):
+        populate_eval_after(move_results, mate_stm_per_pos, positions, stockfish)
 
     yield AnalysisCompleteEvent(moves=move_results, minefields=minefields)

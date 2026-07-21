@@ -12,13 +12,14 @@ describe('useGameAnalysis stored-game restore',()=>{
   beforeEach(() => vi.clearAllMocks())
   it('restores the persisted result and jumps to the saved mistake ply',()=>{
     const move=suggestion()
-    const game={id:'run-1',normalized_pgn:'*',headers:{},request:{acceptable_drop:.5,minefield_threshold:.8,engine_depth:12,blunder_threshold:1,mbi_trap_threshold:.4,mbi_outlier_threshold:.05,eig_threshold:2,bri_threshold:.05,maia3_white_elo:2400,maia3_black_elo:2350},engine:{},maia:{},metric_schema_version:2,result:{moves:[{...move,best_line_evals:{},good_moves_with_eval:{},is_minefield:true,is_eig_flagged:false,is_brilliant:false,bri_maia_prob:null,eig_value:null,epe_score:null,mate_in:null,stockfish_eval:.4,eval_after:-.9}],minefields:[0]},created_at:'',updated_at:''} as unknown as StoredGame
+    const game={id:'run-1',normalized_pgn:'*',headers:{},request:{acceptable_drop:.5,minefield_threshold:.8,engine_depth:12,blunder_threshold:1,mbi_trap_threshold:.4,mbi_outlier_threshold:.05,eig_threshold:2,bri_threshold:.05,maia3_white_elo:2400,maia3_black_elo:2350},engine:{},maia:{},metric_schema_version:2,result:{moves:[{...move,best_line_evals:{},good_moves_with_eval:{},is_minefield:true,is_eig_flagged:false,is_brilliant:false,bri_maia_prob:null,eig_value:null,epe_score:3.14,mate_in:null,stockfish_eval:.4,eval_after:-.9}],minefields:[0]},created_at:'',updated_at:''} as unknown as StoredGame
     const {result}=renderHook(()=>useGameAnalysis())
     act(()=>result.current.restoreAnalysis(game,0))
     expect(result.current.result?.analysis_run_id).toBe('run-1')
     expect(result.current.selectedMoveIndex).toBe(0)
     expect(result.current.analysisMaia3WhiteElo).toBe(2400)
     expect(result.current.analysisMaia3BlackElo).toBe(2350)
+    expect(api.sse).not.toHaveBeenCalled()
   })
 
   it('uses the historical 2200 context only for restored runs missing explicit Elo values',()=>{

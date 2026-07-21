@@ -80,6 +80,7 @@ export interface AnalyzerHandlersDeps {
   setUploadedFileName: (v: string | null) => void;
   setShowConfig: (v: boolean | ((prev: boolean) => boolean)) => void;
   variationState: { moveIndex: number; varIndex: number } | null;
+  varEvalCache: Map<string, PositionEvalResult>;
   setVariationState: (v: { moveIndex: number; varIndex: number } | null) => void;
   onImportedGame?: (result: PgnUploadResponse) => void;
 }
@@ -143,6 +144,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     setUploadedFileName,
     setShowConfig,
     variationState,
+    varEvalCache,
     setVariationState,
     onImportedGame,
   } = d;
@@ -279,7 +281,9 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
               fen,
               side,
               moveNumber,
-              evalResult: normalizeEvalResult(activeVariationMove.best_line_evals?.[fen]),
+              evalResult: normalizeEvalResult(
+                varEvalCache.get(fen) ?? activeVariationMove.best_line_evals?.[fen],
+              ),
             });
           }
         }
@@ -319,6 +323,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
       currentExplorationIndex,
       exploredMoves,
       variationState,
+      varEvalCache,
       selectMove,
       goTo,
       startNewExploration,

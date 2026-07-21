@@ -7,6 +7,12 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.analysis.analyzer import analyze_game
+from app.analysis.diagnostics import (
+    AnalysisDiagnostics,
+    activate_diagnostics,
+    diagnostic_scope,
+    diagnostic_stage,
+)
 from app.analysis.data_models import AnalysisCompleteEvent, AnalysisProgressEvent
 from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
@@ -195,16 +201,23 @@ async def analyze(request: AnalyzeRequest, req: Request):
                 history = repository.analysis_history(game_id)
 
                 def cached_stream():
-                    result = cached.get("result", {})
-                    yield _complete_event(
-                        moves=list(result.get("moves", [])),
-                        minefields=list(result.get("minefields", [])),
-                        analysis_run_id=str(cached["id"]),
-                        game_id=game_id,
-                        cache_hit=True,
-                        analysis_history=history,
-                        persistence_warning=startup_persistence_warning,
-                    )
+                    diagnostics = AnalysisDiagnostics("cached_analysis")
+                    try:
+                        result = cached.get("result", {})
+                        yield _complete_event(
+                            moves=list(result.get("moves", [])),
+                            minefields=list(result.get("minefields", [])),
+                            analysis_run_id=str(cached["id"]),
+                            game_id=game_id,
+                            cache_hit=True,
+                            analysis_history=history,
+                            persistence_warning=startup_persistence_warning,
+                        )
+                    except BaseException as exc:
+                        diagnostics.emit("failure", type(exc).__name__)
+                        raise
+                    else:
+                        diagnostics.emit("complete")
 
                 return StreamingResponse(cached_stream(), media_type="text/event-stream")
         except KeyError as exc:
@@ -220,24 +233,34 @@ async def analyze(request: AnalyzeRequest, req: Request):
     def event_stream():
         # Set the requested analysis depth on the shared engine instance.
         # The lock serialises engine access across concurrent requests.
+        diagnostics = AnalysisDiagnostics("full_analysis")
         with lock:
             original_depth = stockfish.depth
             stockfish.depth = request.engine_depth
+            events = analyze_game(
+                pgn_text=request.pgn,
+                stockfish=stockfish,
+                maia=maia,
+                acceptable_drop=request.acceptable_drop,
+                minefield_threshold=request.minefield_threshold,
+                blunder_threshold=request.blunder_threshold,
+                mbi_trap_threshold=request.mbi_trap_threshold,
+                mbi_outlier_threshold=request.mbi_outlier_threshold,
+                eig_threshold=request.eig_threshold,
+                bri_threshold=request.bri_threshold,
+                maia3_white_elo=request.maia3_white_elo,
+                maia3_black_elo=request.maia3_black_elo,
+            )
             try:
-                for event in analyze_game(
-                    pgn_text=request.pgn,
-                    stockfish=stockfish,
-                    maia=maia,
-                    acceptable_drop=request.acceptable_drop,
-                    minefield_threshold=request.minefield_threshold,
-                    blunder_threshold=request.blunder_threshold,
-                    mbi_trap_threshold=request.mbi_trap_threshold,
-                    mbi_outlier_threshold=request.mbi_outlier_threshold,
-                    eig_threshold=request.eig_threshold,
-                    bri_threshold=request.bri_threshold,
-                    maia3_white_elo=request.maia3_white_elo,
-                    maia3_black_elo=request.maia3_black_elo,
-                ):
+                while True:
+                    try:
+                        # Starlette may resume a sync body iterator in a fresh
+                        # context for each chunk, so activate only around the
+                        # work that advances the analysis generator.
+                        with activate_diagnostics(diagnostics):
+                            event = next(events)
+                    except StopIteration:
+                        break
                     if isinstance(event, AnalysisProgressEvent):
                         data = json.dumps({
                             "type": "progress",
@@ -247,40 +270,48 @@ async def analyze(request: AnalyzeRequest, req: Request):
                         })
                         yield f"data: {data}\n\n"
                     elif isinstance(event, AnalysisCompleteEvent):
-                        moves_data = [asdict(move) for move in event.moves]
-                        analysis_run_id: str | None = None
-                        persistence_warning = startup_persistence_warning
-                        if repository is not None:
-                            try:
-                                snapshot = build_analysis_snapshot(
-                                    pgn_text=parsed.normalized_pgn,
-                                    request=request.model_dump(),
-                                    engine=engine_identity,
-                                    maia=maia_identity,
-                                    moves=event.moves,
+                        with activate_diagnostics(diagnostics):
+                            with diagnostic_stage("result_finalization"):
+                                moves_data = [asdict(move) for move in event.moves]
+                                analysis_run_id: str | None = None
+                                persistence_warning = startup_persistence_warning
+                                if repository is not None:
+                                    try:
+                                        snapshot = build_analysis_snapshot(
+                                            pgn_text=parsed.normalized_pgn,
+                                            request=request.model_dump(),
+                                            engine=engine_identity,
+                                            maia=maia_identity,
+                                            moves=event.moves,
+                                            minefields=event.minefields,
+                                            game_id=game_id,
+                                        )
+                                        analysis_run_id = repository.create_analysis_run(snapshot)
+                                    except Exception as exc:
+                                        persistence_warning = (
+                                            "Analysis completed, but the local Mistake Library cannot "
+                                            f"save this game because persistence failed: {exc}"
+                                        )
+                                history = (
+                                    repository.analysis_history(game_id)
+                                    if repository is not None and game_id is not None
+                                    else []
+                                )
+                                complete_event = _complete_event(
+                                    moves=moves_data,
                                     minefields=event.minefields,
+                                    analysis_run_id=analysis_run_id,
                                     game_id=game_id,
+                                    cache_hit=False,
+                                    analysis_history=history,
+                                    persistence_warning=persistence_warning,
                                 )
-                                analysis_run_id = repository.create_analysis_run(snapshot)
-                            except Exception as exc:
-                                persistence_warning = (
-                                    "Analysis completed, but the local Mistake Library cannot "
-                                    f"save this game because persistence failed: {exc}"
-                                )
-                        history = (
-                            repository.analysis_history(game_id)
-                            if repository is not None and game_id is not None
-                            else []
-                        )
-                        yield _complete_event(
-                            moves=moves_data,
-                            minefields=event.minefields,
-                            analysis_run_id=analysis_run_id,
-                            game_id=game_id,
-                            cache_hit=False,
-                            analysis_history=history,
-                            persistence_warning=persistence_warning,
-                        )
+                        yield complete_event
+            except BaseException as exc:
+                diagnostics.emit("failure", type(exc).__name__)
+                raise
+            else:
+                diagnostics.emit("complete")
             finally:
                 stockfish.depth = original_depth
 
@@ -300,10 +331,13 @@ async def evaluate_position(request: EvaluatePositionRequest, req: Request):
 
     stockfish: StockfishClient = req.app.state.stockfish
     lock: threading.Lock = req.app.state.stockfish_lock
-    with lock:
-        result = stockfish.evaluate_position(
-            board, depth=request.depth, acceptable_drop=request.acceptable_drop
-        )
+    request_kind = "lazy_variation_detail" if request.purpose == "variation_detail" else "exploration"
+    with diagnostic_scope(request_kind):
+        with diagnostic_stage(request_kind):
+            with lock:
+                result = stockfish.evaluate_position(
+                    board, depth=request.depth, acceptable_drop=request.acceptable_drop
+                )
     return EvaluatePositionResponse(
         eval=result["eval"],
         best_move=result["best_move"],

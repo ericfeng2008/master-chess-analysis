@@ -32,8 +32,6 @@ export function buildAnalysisChartData(moves: AnalysisMoveLike[]): ChartDataPoin
   return moves.map((move, index) => {
     const rawEval = finiteNumber(move.eval_after) ? move.eval_after : null;
     const transformedEval = rawEval === null ? null : evalTransform(rawEval);
-    const rawEpe = finiteNumber(move.epe_score) ? move.epe_score : null;
-
     return {
       index,
       label: `${move.move_number}${move.side === "white" ? "." : "..."}`,
@@ -43,7 +41,6 @@ export function buildAnalysisChartData(moves: AnalysisMoveLike[]): ChartDataPoin
       ctiWhite: move.side === "white" ? move.cti : null,
       ctiBlack: move.side === "black" ? move.cti : null,
       ctiApproximate: move.cti_is_approximate ?? false,
-      epe: rawEpe === null ? null : evalTransform(rawEpe),
       mbi_classification: move.mbi_classification,
       mbi_maia_prob: move.mbi_maia_prob,
       eig_value: move.eig_value,
@@ -53,7 +50,6 @@ export function buildAnalysisChartData(moves: AnalysisMoveLike[]): ChartDataPoin
       move_number: move.move_number,
       mate_in: move.mate_in,
       raw_eval: rawEval,
-      raw_epe: rawEpe,
     };
   });
 }

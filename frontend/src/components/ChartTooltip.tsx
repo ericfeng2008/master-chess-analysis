@@ -7,7 +7,6 @@ export interface ChartDataPoint {
   ctiWhite: number | null;
   ctiBlack: number | null;
   ctiApproximate: boolean;
-  epe: number | null;
   mbi_classification: string | null;
   mbi_maia_prob: number | null;
   eig_value: number | null;
@@ -17,7 +16,6 @@ export interface ChartDataPoint {
   move_number: number;
   mate_in: number | null;
   raw_eval: number | null;
-  raw_epe: number | null;
 }
 
 export function CustomTooltip({
@@ -45,7 +43,6 @@ export function CustomTooltip({
       <p style={{ color: d.side === "white" ? "var(--success)" : "var(--warning)" }}>
         CTI: {ctiValue !== null ? `${d.ctiApproximate ? "≈" : ""}${ctiValue.toFixed(d.ctiApproximate ? 3 : 4)}` : "N/A"}
       </p>
-      {d.raw_epe !== null && <p className="text-[var(--violet)]">EPE: {d.raw_epe.toFixed(2)}</p>}
       {d.mbi_classification !== null && (
         <p className="text-[var(--violet)]">
           MBI: {d.mbi_classification === "cognitive_trap"

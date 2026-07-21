@@ -1,3 +1,6 @@
+from collections import OrderedDict
+from time import perf_counter
+from typing import Any
 import os
 
 import chess
@@ -8,6 +11,7 @@ from app.analysis.evaluation import (
     MATE_SCORE_PAWNS,
     terminal_eval_white,
 )
+from app.analysis.diagnostics import record_cache_eviction, record_stockfish_search
 
 
 def extract_mate(score: chess.engine.PovScore) -> int | None:
@@ -19,17 +23,145 @@ def extract_mate(score: chess.engine.PovScore) -> int | None:
 
 
 class StockfishClient:
-    def __init__(self, path: str, depth: int = 20, threads: int = 0, hash_mb: int = 256):
+    def __init__(
+        self,
+        path: str,
+        depth: int = 20,
+        threads: int = 0,
+        hash_mb: int = 256,
+        search_cache_entries: int = 2048,
+    ):
         self.path = path
         self.requested_threads = threads
         self.hash_mb = hash_mb
         self.engine = chess.engine.SimpleEngine.popen_uci(path)
+        self._engine_name = self.engine.id.get("name", "Stockfish")
         self.depth = depth
         # Auto-detect CPU count if threads=0
         if threads <= 0:
             threads = max(1, (os.cpu_count() or 2) - 1)
         self.threads = threads
         self.engine.configure({"Threads": threads, "Hash": hash_mb})
+        self.search_cache_entries = max(0, search_cache_entries)
+        self._search_cache: OrderedDict[tuple, Any] = OrderedDict()
+        self._cache_configuration = self._configuration_signature()
+
+    def _configuration_signature(self) -> tuple:
+        engine = getattr(self, "engine", None)
+        engine_name = getattr(self, "_engine_name", None)
+        if engine_name is None:
+            try:
+                engine_id = getattr(engine, "id", {})
+                engine_name = (
+                    engine_id.get("name", "Stockfish")
+                    if isinstance(engine_id, dict)
+                    else "Stockfish"
+                )
+            except chess.engine.EngineTerminatedError:
+                engine_name = "Stockfish"
+        return (
+            getattr(self, "path", ""),
+            engine_name,
+            getattr(self, "threads", None),
+            getattr(self, "hash_mb", None),
+        )
+
+    def _ensure_runtime_state(self) -> None:
+        if not hasattr(self, "search_cache_entries"):
+            # Supports lightweight test doubles built with __new__.
+            self.search_cache_entries = 0
+        if not hasattr(self, "_search_cache"):
+            self._search_cache = OrderedDict()
+        signature = self._configuration_signature()
+        if getattr(self, "_cache_configuration", signature) != signature:
+            self._search_cache.clear()
+        self._cache_configuration = signature
+
+    @staticmethod
+    def _board_search_identity(board: chess.Board) -> tuple:
+        root = board.root()
+        return (
+            root.fen(en_passant="fen"),
+            tuple(move.uci() for move in board.move_stack),
+            bool(board.chess960),
+        )
+
+    @staticmethod
+    def _clone_cached_result(value: Any) -> Any:
+        if isinstance(value, tuple):
+            move, evaluation, pv, mate = value
+            return move, evaluation, list(pv), mate
+        return {
+            move: (evaluation, list(pv), mate)
+            for move, (evaluation, pv, mate) in value.items()
+        }
+
+    def _cache_get(self, key: tuple) -> Any | None:
+        self._ensure_runtime_state()
+        if self.search_cache_entries <= 0 or key not in self._search_cache:
+            return None
+        value = self._search_cache.pop(key)
+        self._search_cache[key] = value
+        return self._clone_cached_result(value)
+
+    def _cache_put(self, key: tuple, value: Any) -> None:
+        self._ensure_runtime_state()
+        if self.search_cache_entries <= 0:
+            return
+        if key in self._search_cache:
+            self._search_cache.pop(key)
+        self._search_cache[key] = self._clone_cached_result(value)
+        while len(self._search_cache) > self.search_cache_entries:
+            self._search_cache.popitem(last=False)
+            record_cache_eviction()
+
+    def clear_search_cache(self) -> None:
+        self._ensure_runtime_state()
+        self._search_cache.clear()
+
+    def _analyse(
+        self,
+        board: chess.Board,
+        limit: chess.engine.Limit,
+        *,
+        search_kind: str,
+        depth: int,
+        root_count: int = 0,
+        **kwargs,
+    ):
+        started = perf_counter()
+        try:
+            infos = self.engine.analyse(board, limit, **kwargs)
+        except BaseException:
+            record_stockfish_search(
+                search_kind=search_kind,
+                elapsed_ms=(perf_counter() - started) * 1000,
+                infos=[],
+                root_count=root_count,
+                depth=depth,
+                cache_outcome="miss",
+                failed=True,
+            )
+            raise
+        record_stockfish_search(
+            search_kind=search_kind,
+            elapsed_ms=(perf_counter() - started) * 1000,
+            infos=infos,
+            root_count=root_count,
+            depth=depth,
+            cache_outcome="miss",
+        )
+        return infos
+
+    def _record_cache_hit(self, search_kind: str, depth: int, root_count: int) -> None:
+        record_stockfish_search(
+            search_kind=search_kind,
+            elapsed_ms=0.0,
+            infos=[],
+            root_count=root_count,
+            depth=depth,
+            cache_outcome="hit",
+        )
 
     @property
     def identity(self) -> dict:
@@ -43,26 +175,37 @@ class StockfishClient:
 
     def evaluate(self, board: chess.Board) -> float:
         """Return evaluation in pawns from side-to-move perspective."""
-        info = self.engine.analyse(board, chess.engine.Limit(depth=self.depth))
+        info = self._analyse(
+            board,
+            chess.engine.Limit(depth=self.depth),
+            search_kind="evaluate",
+            depth=self.depth,
+        )
         score = info["score"].relative
         return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
 
     def quick_evaluate(self, board: chess.Board, depth: int = 8) -> float:
         """Fast low-depth evaluation from side-to-move perspective."""
-        info = self.engine.analyse(board, chess.engine.Limit(depth=depth))
+        info = self._analyse(
+            board, chess.engine.Limit(depth=depth), search_kind="quick", depth=depth
+        )
         score = info["score"].relative
         return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
 
     def quick_evaluate_with_pv(self, board: chess.Board, depth: int = 8) -> tuple[float, list[chess.Move]]:
         """Fast low-depth evaluation returning (eval, pv_line)."""
-        info = self.engine.analyse(board, chess.engine.Limit(depth=depth))
+        info = self._analyse(
+            board, chess.engine.Limit(depth=depth), search_kind="quick_pv", depth=depth
+        )
         score = info["score"].relative
         pv_line = info.get("pv", [])
         return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0, pv_line
 
     def quick_evaluate_with_mate(self, board: chess.Board, depth: int = 8) -> tuple[float, int | None]:
         """Fast low-depth evaluation returning (eval, mate_in)."""
-        info = self.engine.analyse(board, chess.engine.Limit(depth=depth))
+        info = self._analyse(
+            board, chess.engine.Limit(depth=depth), search_kind="quick_mate", depth=depth
+        )
         score = info["score"].relative
         mate = score.mate() if score.is_mate() else None
         return score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0, mate
@@ -76,14 +219,32 @@ class StockfishClient:
         if board.is_game_over() or board.legal_moves.count() == 0:
             return None
         analysis_depth = depth if depth is not None else self.depth
-        info = self.engine.analyse(board, chess.engine.Limit(depth=analysis_depth))
+        key = (
+            "best",
+            self._configuration_signature(),
+            self._board_search_identity(board),
+            analysis_depth,
+        )
+        cached = self._cache_get(key)
+        if cached is not None:
+            self._record_cache_hit("best", analysis_depth, 1)
+            return cached
+        info = self._analyse(
+            board,
+            chess.engine.Limit(depth=analysis_depth),
+            search_kind="best",
+            depth=analysis_depth,
+            root_count=1,
+        )
         pv_line = info.get("pv", [])
         if not pv_line:
             return None
         score = info["score"].relative
         mate = score.mate() if score.is_mate() else None
         evaluation = score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
-        return pv_line[0], evaluation, pv_line, mate
+        result = (pv_line[0], evaluation, list(pv_line), mate)
+        self._cache_put(key, result)
+        return self._clone_cached_result(result)
 
     def evaluate_root_moves(
         self,
@@ -100,9 +261,24 @@ class StockfishClient:
             raise ValueError(f"Illegal root move for position: {illegal[0].uci()}")
 
         analysis_depth = depth if depth is not None else self.depth
-        infos = self.engine.analyse(
+        key = (
+            "restricted_roots",
+            self._configuration_signature(),
+            self._board_search_identity(board),
+            analysis_depth,
+            tuple(move.uci() for move in roots),
+            len(roots),
+        )
+        cached = self._cache_get(key)
+        if cached is not None:
+            self._record_cache_hit("restricted_roots", analysis_depth, len(roots))
+            return cached
+        infos = self._analyse(
             board,
             chess.engine.Limit(depth=analysis_depth),
+            search_kind="restricted_roots",
+            depth=analysis_depth,
+            root_count=len(roots),
             multipv=len(roots),
             root_moves=roots,
         )
@@ -119,7 +295,9 @@ class StockfishClient:
             mate = score.mate() if score.is_mate() else None
             evaluation = score.score(mate_score=MATE_SCORE_CENTIPAWNS) / 100.0
             results[move] = (evaluation, pv_line, mate)
-        return results
+        if len(results) == len(roots):
+            self._cache_put(key, results)
+        return self._clone_cached_result(results)
 
     def analyse_candidates(
         self,
@@ -140,9 +318,12 @@ class StockfishClient:
             multipv = min(multipv, len(roots))
         else:
             multipv = min(multipv, board.legal_moves.count())
-        infos = self.engine.analyse(
+        infos = self._analyse(
             board,
             chess.engine.Limit(depth=depth),
+            search_kind="candidates",
+            depth=depth,
+            root_count=len(roots) if roots is not None else multipv,
             multipv=max(1, multipv),
             root_moves=roots,
             info=chess.engine.INFO_ALL,
@@ -226,8 +407,13 @@ class StockfishClient:
                 # Phase 1: cheap probe to measure eval density among top moves
                 probe_pv = min(5, num_moves)
                 probe_depth = min(10, analysis_depth)
-                probe_infos = self.engine.analyse(
-                    board, chess.engine.Limit(depth=probe_depth), multipv=probe_pv
+                probe_infos = self._analyse(
+                    board,
+                    chess.engine.Limit(depth=probe_depth),
+                    search_kind="all_moves_probe",
+                    depth=probe_depth,
+                    root_count=probe_pv,
+                    multipv=probe_pv,
                 )
                 probe_evals: list[float] = []
                 for info in probe_infos:
@@ -243,12 +429,22 @@ class StockfishClient:
                 dense_count = sum(1 for ev in probe_evals if best_probe_eval - ev <= safety_window)
                 multipv = max(1, min(dense_count, 5, num_moves))
             # Phase 2: full-depth search with right-sized MultiPV.
-            infos = self.engine.analyse(
-                board, chess.engine.Limit(depth=analysis_depth), multipv=multipv
+            infos = self._analyse(
+                board,
+                chess.engine.Limit(depth=analysis_depth),
+                search_kind="all_moves",
+                depth=analysis_depth,
+                root_count=multipv,
+                multipv=multipv,
             )
         else:
-            infos = self.engine.analyse(
-                board, chess.engine.Limit(depth=analysis_depth), multipv=num_moves
+            infos = self._analyse(
+                board,
+                chess.engine.Limit(depth=analysis_depth),
+                search_kind="all_moves",
+                depth=analysis_depth,
+                root_count=num_moves,
+                multipv=num_moves,
             )
 
         results: dict[chess.Move, tuple[float, list[chess.Move], int | None]] = {}
@@ -285,7 +481,13 @@ class StockfishClient:
             mate = 1 if abs(terminal_white) == MATE_SCORE_PAWNS else None
             return eval_from_current_stm, [move], mate
 
-        info = self.engine.analyse(board_after, chess.engine.Limit(depth=analysis_depth))
+        info = self._analyse(
+            board_after,
+            chess.engine.Limit(depth=analysis_depth),
+            search_kind="move",
+            depth=analysis_depth,
+            root_count=1,
+        )
         score = info["score"].relative
         mate = score.mate() if score.is_mate() else None
         # Engine score is from the opponent's perspective after the move.
@@ -353,6 +555,7 @@ class StockfishClient:
         }
 
     def close(self):
+        self.clear_search_cache()
         try:
             self.engine.quit()
         except chess.engine.EngineTerminatedError:

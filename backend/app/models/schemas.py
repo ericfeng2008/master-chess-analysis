@@ -125,6 +125,7 @@ class EvaluatePositionRequest(BaseModel):
     fen: str
     depth: int = Field(default=12, ge=10, le=20)
     acceptable_drop: float = Field(default=0.5, ge=0.0)
+    purpose: Literal["exploration", "variation_detail"] = "exploration"
 
 
 class EvaluatePositionResponse(BaseModel):

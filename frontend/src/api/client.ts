@@ -120,10 +120,12 @@ export async function evaluatePosition(
   fen: string,
   depth: number = 12,
   acceptableDrop: number = 0.5,
+  purpose: 'exploration' | 'variation_detail' = 'exploration',
 ): Promise<PositionEvalResult> {
   return apiPost<PositionEvalResult>('/api/evaluate-position', {
     fen,
     depth,
     acceptable_drop: acceptableDrop,
+    purpose,
   })
 }

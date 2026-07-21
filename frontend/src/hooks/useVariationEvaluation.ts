@@ -7,19 +7,31 @@ import { bestLineFens } from '../utils/bestLineFens';
 interface VariationEvaluationDeps {
   variationState: { moveIndex: number; varIndex: number } | null;
   ctiResult: AnalyzeResult | null;
-  engineDepth: number;
   acceptableDrop: number;
 }
 
 const EMPTY_CACHE = new Map<string, PositionEvalResult>()
+const VARIATION_DETAIL_DEPTH = 10
 
 export function useVariationEvaluation(deps: VariationEvaluationDeps) {
-  const { variationState, ctiResult, engineDepth, acceptableDrop } = deps;
+  const { variationState, ctiResult, acceptableDrop } = deps;
+  const detailSettingsKey = `${VARIATION_DETAIL_DEPTH}|${acceptableDrop}`;
 
-  const [cacheState, setCacheState] = useState<{ result: AnalyzeResult | null; values: Map<string, PositionEvalResult> }>({ result: null, values: new Map() });
-  const [loadingState, setLoadingState] = useState<{ result: AnalyzeResult | null; fen: string | null }>({ result: null, fen: null });
-  const varEvalCache = cacheState.result === ctiResult ? cacheState.values : EMPTY_CACHE;
-  const varEvalLoading = loadingState.result === ctiResult ? loadingState.fen : null;
+  const [cacheState, setCacheState] = useState<{
+    result: AnalyzeResult | null;
+    valuesBySettings: Map<string, Map<string, PositionEvalResult>>;
+  }>({ result: null, valuesBySettings: new Map() });
+  const [loadingState, setLoadingState] = useState<{
+    result: AnalyzeResult | null;
+    settingsKey: string;
+    fen: string | null;
+  }>({ result: null, settingsKey: '', fen: null });
+  const varEvalCache = cacheState.result === ctiResult
+    ? cacheState.valuesBySettings.get(detailSettingsKey) ?? EMPTY_CACHE
+    : EMPTY_CACHE;
+  const varEvalLoading = loadingState.result === ctiResult && loadingState.settingsKey === detailSettingsKey
+    ? loadingState.fen
+    : null;
 
   const varEvalSeqRef = useRef(0);
   const varEvalFetchedRef = useRef<Set<string>>(new Set());
@@ -46,18 +58,23 @@ export function useVariationEvaluation(deps: VariationEvaluationDeps) {
       return;
     }
 
-    if (varEvalFetchedRef.current.has(fenAfter)) {
+    const requestKey = `${fenAfter}|${VARIATION_DETAIL_DEPTH}|${acceptableDrop}`;
+    if (varEvalFetchedRef.current.has(requestKey)) {
       return;
     }
-    varEvalFetchedRef.current.add(fenAfter);
+    varEvalFetchedRef.current.add(requestKey);
 
     const preComputed = analysisMove.best_line_evals?.[fenAfter];
     if (preComputed) {
       queueMicrotask(() => {
         setCacheState((prev) => {
-          const next = new Map(prev.result === ctiResult ? prev.values : EMPTY_CACHE);
-          next.set(fenAfter, preComputed);
-          return { result: ctiResult, values: next };
+          const valuesBySettings = new Map(
+            prev.result === ctiResult ? prev.valuesBySettings : undefined,
+          );
+          const values = new Map(valuesBySettings.get(detailSettingsKey) ?? EMPTY_CACHE);
+          values.set(fenAfter, preComputed);
+          valuesBySettings.set(detailSettingsKey, values);
+          return { result: ctiResult, valuesBySettings };
         });
       });
       return;
@@ -70,13 +87,23 @@ export function useVariationEvaluation(deps: VariationEvaluationDeps) {
 
     const seq = ++varEvalSeqRef.current;
     queueMicrotask(() => {
-      setLoadingState({ result: ctiResult, fen: fenAfter });
+      setLoadingState({ result: ctiResult, settingsKey: detailSettingsKey, fen: fenAfter });
     });
 
     void (async () => {
       try {
-        const preResult = await evaluatePosition(preFen, engineDepth, acceptableDrop);
-        const postResult = await evaluatePosition(fenAfter, engineDepth, acceptableDrop);
+        const preResult = await evaluatePosition(
+          preFen,
+          VARIATION_DETAIL_DEPTH,
+          acceptableDrop,
+          'variation_detail',
+        );
+        const postResult = await evaluatePosition(
+          fenAfter,
+          VARIATION_DETAIL_DEPTH,
+          acceptableDrop,
+          'variation_detail',
+        );
 
         const merged: PositionEvalResult = {
           eval: postResult.eval,
@@ -88,19 +115,23 @@ export function useVariationEvaluation(deps: VariationEvaluationDeps) {
         };
 
         setCacheState((prev) => {
-          const next = new Map(prev.result === ctiResult ? prev.values : EMPTY_CACHE);
-          next.set(fenAfter, merged);
-          return { result: ctiResult, values: next };
+          const valuesBySettings = new Map(
+            prev.result === ctiResult ? prev.valuesBySettings : undefined,
+          );
+          const values = new Map(valuesBySettings.get(detailSettingsKey) ?? EMPTY_CACHE);
+          values.set(fenAfter, merged);
+          valuesBySettings.set(detailSettingsKey, values);
+          return { result: ctiResult, valuesBySettings };
         });
       } catch {
-        varEvalFetchedRef.current.delete(fenAfter);
+        varEvalFetchedRef.current.delete(requestKey);
       } finally {
         if (seq === varEvalSeqRef.current) {
-          setLoadingState({ result: ctiResult, fen: null });
+          setLoadingState({ result: ctiResult, settingsKey: detailSettingsKey, fen: null });
         }
       }
     })();
-  }, [variationState, ctiResult, engineDepth, acceptableDrop]);
+  }, [variationState, ctiResult, acceptableDrop, detailSettingsKey]);
 
   return { varEvalCache, varEvalLoading };
 }

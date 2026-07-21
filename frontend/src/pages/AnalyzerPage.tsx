@@ -160,6 +160,12 @@ export function AnalyzerPage() {
   const activeIndex = nav.currentIndex;
   const selectedMove = activeIndex !== null && cti.result ? cti.result.moves[activeIndex] ?? null : null;
 
+  const { varEvalCache, varEvalLoading } = useVariationEvaluation({
+    variationState,
+    ctiResult: cti.result,
+    acceptableDrop,
+  });
+
   const handlers = useAnalyzerHandlers({
     ctiResult: cti.result,
     selectMove: cti.selectMove,
@@ -203,6 +209,7 @@ export function AnalyzerPage() {
     setUploadedFileName,
     setShowConfig,
     variationState,
+    varEvalCache,
     setVariationState,
     onImportedGame: (result) => {
       exploration.clearExplorations();
@@ -275,13 +282,6 @@ export function AnalyzerPage() {
       setOpeningGameId(null);
     }
   };
-
-  const { varEvalCache, varEvalLoading } = useVariationEvaluation({
-    variationState,
-    ctiResult: cti.result,
-    engineDepth,
-    acceptableDrop,
-  });
 
   useAnalyzerKeyboard({
     exploration,
@@ -719,7 +719,6 @@ function IntroPanel({ height }: { height: number | null }) {
         <span>MBI</span>
         <span>EIG</span>
         <span>BRI</span>
-        <span>EPE</span>
       </div>
 
       <div className="intro-grid">
@@ -734,7 +733,7 @@ function IntroPanel({ height }: { height: number | null }) {
         <div>
           <h3>3. Review both players</h3>
           <p>
-            After analysis, the timeline chart appears with CTI, minefields, MBI, EIG, BRI, and EPE metrics
+            After analysis, the timeline chart appears with CTI, minefields, MBI, EIG, and BRI metrics
             for White and Black perspectives.
           </p>
         </div>

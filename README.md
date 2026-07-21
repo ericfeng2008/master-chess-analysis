@@ -20,7 +20,6 @@ By combining objective evaluation from Stockfish with human move probabilities f
 - **"How hard is this position?"** If Stockfish says only 2 moves are good, and Maia says humans would play one of those 2 moves 90% of the time, the position is easy (low CTI). If Maia says humans would almost never find the good moves, the position is a minefield (high CTI).
 - **"Was this blunder a natural mistake?"** If Maia predicts that many players in the selected Elo context would choose the bad move, it is a **Cognitive Trap** — a genuinely tricky position worth studying. A low-probability error is less characteristic of that Maia population, but the model does not diagnose the individual player's cause.
 - **"Does the engine disagree with human intuition?"** A high **Engine-Intuition Gap (EIG)** means the computer's best move is very different from what humans naturally choose. These are positions where game analysis can reveal non-obvious resources.
-- **"What eval should I realistically expect?"** **EPE** predicts the actual position value assuming the opponent plays like a human, not like a computer. This is often more useful for practical game review than the raw engine eval.
 
 Analysis runs locally on your machine — no cloud services, no data sent externally.
 
@@ -33,7 +32,6 @@ Analysis runs locally on your machine — no cloud services, no data sent extern
 | **MBI** (Master Blunder Index) | Classifies blunders by human likelihood |
 | **EIG** (Engine-Intuition Gap) | Divergence between engine and human preference |
 | **BRI** (Brilliancy) | Objectively strong moves that humans rarely find |
-| **EPE** (Expected Practical Evaluation) | Eval weighted by likely human responses |
 
 
 ## Prerequisites
@@ -134,6 +132,7 @@ If your engines are installed in non-default locations, or you want to tune engi
 | `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `12` | Backend fallback Stockfish search depth (higher = more accurate but slower) |
 | `ANALYSIS_STOCKFISH_THREADS` | `0` (auto) | CPU threads for Stockfish (`0` = auto-detect: `cpu_count - 1`) |
 | `ANALYSIS_STOCKFISH_HASH_MB` | `256` | Stockfish hash table size in MB (more = better for deep analysis) |
+| `ANALYSIS_STOCKFISH_SEARCH_CACHE_ENTRIES` | `2048` | Maximum exact process-local Stockfish best/root search results retained in the LRU cache (`0` disables it) |
 | `ANALYSIS_DATA_DIR` | `backend/data` | Directory for the local game and Mistake Library SQLite database |
 
 Example:
@@ -177,6 +176,8 @@ Click **Analyze** to start. A progress bar shows positions analyzed and minefiel
 
 Completed analyses are immutable versions of the game. Cache compatibility includes every result-affecting setting, the Stockfish and Maia runtime identities, and the result schema version. Clicking **Analyze** with an exact previously completed configuration restores that version without engine work. Changing depth, thresholds, Elo context, or another result-affecting setting creates a new version. The **Analysis history** control identifies versions by date, depth, and runtime provenance and can restore any of them instantly.
 
+Within the running backend process, exact unrestricted-best and restricted-root Stockfish searches are also retained in a bounded LRU cache. Cache identity includes ordered game history, depth, engine options, ordered roots, and MultiPV semantics. This application cache is independent of Stockfish's `Hash` transposition-table setting and is cleared when the engine configuration changes or the engine closes.
+
 ### 4. Navigate Results
 
 After analysis completes:
@@ -185,7 +186,7 @@ After analysis completes:
 - **Move Navigator**: Use the arrow buttons below the board to step through moves.
 - **PGN Viewer**: Click any move in the PGN notation to navigate there. Stockfish best continuations for blunders appear inline in bold green parenthesized notation `(...)`. User-explored variations appear in teal bracket notation `[...]`.
 - **Chess Board**: Updates automatically to show the position for the selected move. After analysis, a thin vertical evaluation bar beside the main board visualizes that exact position's White-versus-Black balance. Hover over the bar to reveal only its compact White-perspective value: signed pawn scores such as `+1.25` or `-2.50`, signed mate values such as `#3` or `#-2`, and terminal results `1-0` or `0-1`. Explored and Stockfish-variation positions use a neutral striped bar with a `pending` tooltip while their ad-hoc evaluation runs, never a stale mainline value. The segment order flips with the board without changing the score's perspective. Click the flip button to change board orientation. After analysis, drag or click pieces to explore alternative moves.
-- **Position Info**: Shows detailed metrics for the selected move including eval, CTI, minefield status, MBI classification, EIG, BRI, and EPE.
+- **Position Info**: Shows detailed metrics for the selected move including eval, CTI, minefield status, MBI classification, EIG, and BRI.
 
 ### 5. Explore Alternative Moves
 
@@ -194,7 +195,7 @@ After analysis completes, the board becomes interactive. You can test "what if" 
 - **Drag a piece** or **click a piece then click its target** to play an alternative move. If the move matches the mainline, navigation advances normally. If it differs, exploration mode begins.
 - **Exploration mode**: A teal "Explored" badge appears in Position Info. Each explored move is evaluated by Stockfish at the configured analysis depth, showing eval, best move, and good moves. CTI is shown only for mainline analyzed positions. Continue playing moves to explore deeper.
 - **Multiple lines**: Explored lines are saved when you exit or start a new exploration. The PGN viewer shows all saved explorations grouped by branch point. Lines sharing a common prefix are merged into a single block.
-- **Stockfish variation details**: Click any move in a Stockfish best-line variation `(...)` to see its evaluation (eval, best move, good moves) with a "Variation" badge. These evaluations are pre-computed during batch analysis and display instantly without additional engine calls.
+- **Stockfish variation details**: The six-half-move principal variation is available immediately after batch analysis. Click a move in a Stockfish best-line variation `(...)` to load its evaluation details (eval, best move, good moves) at depth 10. The board navigates immediately while the detail panel shows a pending state. Results are cached for the current analysis session, failed requests can be retried, and older saved analyses with precomputed details continue to use those values without engine work.
 - **Arrow keys**: Left/Right arrow keys navigate within the active exploration or variation. At the first move, Left exits back to the mainline.
 - **Exit**: Press **Escape**, click any mainline move, or click the chart to exit exploration/variation mode.
 - **Game Info**: Click "Show game info" above the PGN viewer to display PGN metadata (Event, Site, Date, players, Elo, ECO, etc.). The panel auto-hides when you click anywhere else on the page.
@@ -328,25 +329,13 @@ A move is flagged as brilliant when it is the engine's best move and has a very 
 
 **Chart display**: Gold stars.
 
-### EPE (Expected Practical Evaluation)
-
-**Range**: Same as eval (pawns, White's perspective)
-
-EPE predicts the actual evaluation you can expect after the opponent's next move, assuming they play according to human tendencies (as modeled by Maia). Instead of assuming best play, EPE uses a **1-ply lookahead**:
-
-1. Predict the opponent's most likely responses using Maia (top moves covering 95% cumulative probability, capped at 5 moves).
-2. Evaluate each resulting position with Stockfish.
-3. Compute the probability-weighted average. Residual probability mass (moves outside the top N) is assigned the worst-case eval among evaluated moves — pessimistic for the opponent.
-
-`EPE = sum over opponent responses R: Maia_prob(R) * Stockfish_eval(position after R)`
-
-If EPE is significantly higher than the raw eval after White's move, it means Black is likely to respond suboptimally — a practical advantage. If EPE is lower after White's move, Black's natural moves happen to be strong. The alternating perspective creates a characteristic swing pattern on the chart: EPE tends to be optimistic for the side that just moved (because the opponent is human).
-
-**Chart display**: Dashed purple line overlaid on the eval area chart.
-
 ### Best Line
 
 The Stockfish principal variation (up to 6 half-moves) showing the recommended continuation. Displayed in the PGN viewer as inline variations for positions where the played move was a blunder.
+
+### Workload Diagnostics
+
+The backend writes one structured `analysis_workload` log record when a full analysis, cached restore, exploration request, or lazy variation-detail request completes or fails. Each record has a correlation identifier and stage totals for Maia inference, CTI best/candidate/refinement searches, result finalization, and lazy detail work. Stockfish totals include elapsed time, nodes, maximum hash utilization per search, root count, depth, cache hits, and evictions. MultiPV node totals are counted once per engine search rather than once per returned PV. Logs deliberately exclude PGN and FEN content.
 
 ### Mate Detection
 

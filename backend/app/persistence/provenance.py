@@ -16,7 +16,7 @@ from app.pgn_utils import normalize_pgn_for_python_chess
 from .models import AnalysisRunSnapshot
 
 
-METRIC_SCHEMA_VERSION = 2
+METRIC_SCHEMA_VERSION = 3
 GAME_FINGERPRINT_VERSION = 1
 ANALYSIS_FINGERPRINT_VERSION = 1
 MISTAKE_FINGERPRINT_VERSION = 1

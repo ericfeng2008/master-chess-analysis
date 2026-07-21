@@ -2,8 +2,9 @@ import { act, renderHook } from '@testing-library/react'
 import type { ChangeEvent } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { PgnUploadResponse } from '../types'
+import type { AnalyzeResult, AnalysisMoveResult, PgnUploadResponse, PositionEvalResult } from '../types'
 import type { StoredGame } from '../types/mistakes'
+import { bestLineFens } from '../utils/bestLineFens'
 import { useAnalyzerHandler, type AnalyzerHandlersDeps } from './useAnalyzerHandler'
 
 const api = vi.hoisted(() => ({ upload: vi.fn(), getRun: vi.fn() }))
@@ -38,7 +39,7 @@ function deps(overrides: Partial<AnalyzerHandlersDeps> = {}): AnalyzerHandlersDe
     setPgn: vi.fn(), setGameId: vi.fn(), setAnalysisHistory: vi.fn(), setImportPersistenceWarning: vi.fn(),
     clearAnalysis: vi.fn(), restoreImportedAnalysis: vi.fn(), setUploadSummary: vi.fn(), setImportNotice: vi.fn(), setUploadError: vi.fn(),
     setUploading: vi.fn(), setUploadedFileName: vi.fn(), setShowConfig: vi.fn(), variationState: null,
-    setVariationState: vi.fn(), ...overrides,
+    varEvalCache: new Map(), setVariationState: vi.fn(), ...overrides,
   }
 }
 
@@ -102,5 +103,56 @@ describe('useAnalyzerHandler local analysis restoration', () => {
     expect(values.startAnalysis).toHaveBeenCalledWith(
       values.pgn, 'game-1', .5, .8, 18, 1, .4, .05, 2, .05, 2200, 2200,
     )
+  })
+})
+
+describe('useAnalyzerHandler lazy variation handoff', () => {
+  it('carries session-cached variation evaluation into a new exploration', () => {
+    const move = {
+      move_number: 1, side: 'white', move: 'd4',
+      fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+      stockfish_eval: 0, eval_after: 0, cti: null, best_move: 'e4',
+      good_moves: ['e4'], good_moves_with_eval: { e4: 0 }, is_minefield: false,
+      mbi_classification: null, mbi_maia_prob: null, eig_value: null,
+      is_eig_flagged: false, is_brilliant: false, bri_maia_prob: null,
+      epe_score: null, best_line: ['e4'], best_line_evals: {}, mate_in: null,
+    } satisfies AnalysisMoveResult
+    const ctiResult: AnalyzeResult = { moves: [move], minefields: [] }
+    const variationFen = bestLineFens(move.fen, move.best_line)[0]
+    const lazyEvaluation: PositionEvalResult = {
+      eval: 0.35, best_move: 'e4', good_moves: ['e4'],
+      good_moves_with_eval: { e4: 0 }, cti: null, mate_in: null,
+    }
+    const startNewExploration = vi.fn()
+    const addExploredMove = vi.fn()
+
+    const deps = {
+      ctiResult,
+      selectMove: vi.fn(), startAnalysis: vi.fn(),
+      isExploring: false, currentExplorationIndex: -1, exploredMoves: [],
+      startNewExploration, addExploredMove, exitExploration: vi.fn(), navigateExploration: vi.fn(),
+      savedExplorations: [], activeSavedIndex: -1, enterSavedExploration: vi.fn(), goTo: vi.fn(),
+      hasResult: true, activeIndex: 0,
+      parsedMoves: [{ index: 0, moveNumber: 1, side: 'white', san: 'd4', fen: variationFen }],
+      pgn: '1. d4 *', gameId: null, acceptableDrop: 0.5, minefieldThreshold: 0.8,
+      engineDepth: 18, blunderThreshold: 1, mbiTrapThreshold: 0.4,
+      mbiOutlierThreshold: 0.05, eigThreshold: 2, briThreshold: 0.05,
+      maia3WhiteElo: 2600, maia3BlackElo: 2600,
+      setPgn: vi.fn(), setGameId: vi.fn(), setAnalysisHistory: vi.fn(),
+      setImportPersistenceWarning: vi.fn(), clearAnalysis: vi.fn(), restoreImportedAnalysis: vi.fn(),
+      setUploadSummary: vi.fn(), setImportNotice: vi.fn(), setUploadError: vi.fn(),
+      setUploading: vi.fn(), setUploadedFileName: vi.fn(), setShowConfig: vi.fn(),
+      variationState: { moveIndex: 0, varIndex: 0 }, setVariationState: vi.fn(),
+      varEvalCache: new Map([[variationFen, lazyEvaluation]]),
+    } as unknown as AnalyzerHandlersDeps
+
+    const { result } = renderHook(() => useAnalyzerHandler(deps))
+    act(() => expect(result.current.handleBoardMove('e7', 'e5')).toBe(true))
+
+    expect(startNewExploration).toHaveBeenCalledWith(
+      0,
+      [expect.objectContaining({ san: 'e4', fen: variationFen, evalResult: lazyEvaluation })],
+    )
+    expect(addExploredMove).toHaveBeenCalledWith('e5', variationFen, expect.any(String), 18, 0.5)
   })
 })

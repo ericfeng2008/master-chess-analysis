@@ -17,13 +17,6 @@ export function AnalysisChartLegend() {
         </span>
 
         <span className="flex items-center gap-1">
-          <svg width="20" height="14" viewBox="0 0 20 14">
-            <line x1="0" y1="7" x2="20" y2="7" stroke="var(--chart-epe)" strokeWidth="1.5" strokeDasharray="2 3" />
-          </svg>
-          EPE
-        </span>
-
-        <span className="flex items-center gap-1">
           <svg width="14" height="14" viewBox="0 0 14 14">
             <circle cx="7" cy="7" r="5" fill="var(--chart-mine-best)" stroke="var(--chart-mine-best-stroke)" strokeWidth="1.5" />
           </svg>
