@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnalysisMistakeDialog } from "../components/AnalysisMistakeDialog";
 import { AnalysisChart } from "../components/AnalysisChart";
 import { AnalysisChartLegend } from "../components/AnalysisChartLegend";
@@ -623,12 +623,7 @@ export function AnalyzerPage() {
                 />
               </section>
             ) : (
-              <IntroPanel
-                height={boardColumnHeight}
-                onFile={handlers.handleFile}
-                onOpenSavedGame={() => setSavedLibraryOpen(true)}
-                onOpenMistakeLibrary={() => setApplicationView("mistake-library")}
-              />
+              <IntroPanel height={boardColumnHeight} />
             )}
           </main>
 
@@ -705,11 +700,8 @@ export function AnalyzerPage() {
   );
 }
 
-function IntroPanel({ height, onFile, onOpenSavedGame, onOpenMistakeLibrary }: {
+function IntroPanel({ height }: {
   height: number | null
-  onFile: (event: ChangeEvent<HTMLInputElement>) => void
-  onOpenSavedGame: () => void
-  onOpenMistakeLibrary: () => void
 }) {
   return (
     <section className="panel panel-radius panel-pad intro-panel" style={height ? { height } : undefined}>
@@ -722,15 +714,17 @@ function IntroPanel({ height, onFile, onOpenSavedGame, onOpenMistakeLibrary }: {
         <section className="intro-route intro-route-new" aria-labelledby="new-analysis-title">
           <div><span>New analysis</span><h3 id="new-analysis-title">Turn one game into useful lessons.</h3></div>
           <ol className="intro-flow" aria-label="New analysis workflow"><li>Upload PGN</li><li>Run analysis</li><li>Review</li><li>Save mistakes</li></ol>
-          <p>After review, save only the positions you want to revisit in the Mistake Library.</p>
-          <label className="primary-button intro-upload-action">Upload PGN<input type="file" accept=".pgn" className="hidden" onChange={onFile} /></label>
+          <p><strong>Start beneath the board:</strong> upload a PGN, run the analysis, then save only the positions worth revisiting in the Mistake Library.</p>
         </section>
         <section className="intro-route intro-route-continue" aria-labelledby="continue-study-title">
           <div><span>Continue local study</span><h3 id="continue-study-title">Resume the question you left behind.</h3></div>
-          <p><strong>Open Saved Game</strong> restores analysis review. <strong>Mistake Library</strong> lets you inspect, practice, or reopen a saved position's full game.</p>
-          <div className="intro-route-actions"><button type="button" className="text-button" onClick={onOpenSavedGame}>Open Saved Game</button><button type="button" className="text-button" onClick={onOpenMistakeLibrary}>Mistake Library</button></div>
+          <div className="intro-resume-options">
+            <p><strong>Saved game</strong><span>Use Open Saved Game beneath the board to restore an analysis review.</span></p>
+            <p><strong>Saved mistake</strong><span>Use Mistake Library in the page header to inspect, practice, or reopen the full game.</span></p>
+          </div>
         </section>
       </div>
+      <p className="intro-persistence-note">Games and completed analyses stay local automatically. Saving mistakes is an explicit step after review.</p>
     </section>
   );
 }

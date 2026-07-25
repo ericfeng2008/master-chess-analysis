@@ -46,11 +46,13 @@ describe('MistakeLibraryWorkspace',()=>{
     fireEvent.click(screen.getByRole('tab',{name:'History'}))
     expect(screen.getByText('No practice attempts yet.')).toBeInTheDocument()
     expect(screen.getAllByRole('button',{name:'Practice'})).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button',{name:'More'}))
-    expect(screen.getByRole('menuitem',{name:'Archive'})).toBeInTheDocument()
-    expect(screen.getByRole('menuitem',{name:'Delete mistake'})).toBeInTheDocument()
+    expect(screen.queryByRole('button',{name:'More'})).not.toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'Archive'})).toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'Delete mistake'})).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button',{name:'Archive'}))
+    expect(mocks.update).toHaveBeenCalledWith({lifecycle:'archived'})
     const confirm=vi.spyOn(window,'confirm').mockReturnValue(false)
-    fireEvent.click(screen.getByRole('menuitem',{name:'Delete mistake'}))
+    fireEvent.click(screen.getByRole('button',{name:'Delete mistake'}))
     expect(confirm).toHaveBeenCalled()
     expect(mocks.remove).not.toHaveBeenCalled()
     confirm.mockRestore()
@@ -82,14 +84,17 @@ describe('MistakeLibraryWorkspace',()=>{
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
   })
 
-  it('keeps primary searches visible and applies secondary filters from Filters',()=>{
+  it('keeps every discovery filter visible in one toolbar',()=>{
     render(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
     fireEvent.change(screen.getByLabelText('Player name'),{target:{value:'Master'}})
     expect(mocks.setQuery).toHaveBeenCalledWith({player_name:'Master'})
-    fireEvent.click(screen.getByRole('button',{name:'Filters'}))
     fireEvent.change(screen.getByLabelText('Mistake made by'),{target:{value:'white'}})
     expect(mocks.setQuery).toHaveBeenCalledWith({side:'white'})
     expect(screen.getByLabelText('Capture reason')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tag')).toBeInTheDocument()
+    expect(screen.getByLabelText('Practice state')).toBeInTheDocument()
+    expect(screen.getByLabelText('Library state')).toBeInTheDocument()
+    expect(screen.queryByRole('button',{name:'Filters'})).not.toBeInTheDocument()
   })
 
   it('keeps selection controls inside the folio and supports arrow navigation',()=>{

@@ -345,8 +345,10 @@ describe("AnalyzerPage evaluation bar integration", () => {
     expect(screen.getByText("Save mistakes")).toBeInTheDocument();
     expect(screen.queryByLabelText("Analysis metrics")).not.toBeInTheDocument();
     expect(screen.getAllByText("Upload PGN")).not.toHaveLength(0);
-    expect(screen.getAllByRole("button", { name: "Open Saved Game" })).toHaveLength(2);
-    fireEvent.click(screen.getAllByRole("button", { name: "Mistake Library" })[1]);
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Open Saved Game" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Mistake Library" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Mistake Library" }));
     expect(screen.getByTestId("mistake-library-secondary-board")).toBeInTheDocument();
   });
 

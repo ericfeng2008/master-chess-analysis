@@ -3,7 +3,7 @@ import { Chess } from 'chess.js'
 
 import { getStoredGame } from '../../api/mistakes'
 import { useMistakeLibrary } from '../../hooks/useMistakeLibrary'
-import type { MistakeOutcome, MistakeQuery, SavedMistake, StoredGame } from '../../types/mistakes'
+import type { MistakeOutcome, SavedMistake, StoredGame } from '../../types/mistakes'
 import { ChessBoard } from '../ChessBoard'
 
 interface Props { onBack:()=>void; onOpenGame:(game:StoredGame,ply:number)=>void }
@@ -14,8 +14,6 @@ const detailLabels:Record<DetailView,string>={study:'Study',notes:'Notes & Tags'
 const label=(value:string)=>value.replaceAll('_',' ')
 const pct=(value:number|null)=>value==null?'—':`${Math.round(value*100)}%`
 const gameTitle=(item:SavedMistake)=>`${item.headers.White??'White'} — ${item.headers.Black??'Black'}`
-const secondaryQueryKeys:Array<keyof Pick<MistakeQuery,'side'|'reason'|'tag'|'practice_state'|'lifecycle'>>=['side','reason','tag','practice_state','lifecycle']
-
 function useCompactInspector(){
   const [compact,setCompact]=useState(false)
   useEffect(()=>{
@@ -32,7 +30,6 @@ export function MistakeLibraryWorkspace({onBack,onOpenGame}:Props){
   const library=useMistakeLibrary()
   const [screen,setScreen]=useState<'library'|'practice'>('library')
   const [queue,setQueue]=useState<SavedMistake[]>([])
-  const [filtersOpen,setFiltersOpen]=useState(false)
   const [detailView,setDetailView]=useState<DetailView>('study')
   const rowRefs=useRef(new Map<string,HTMLButtonElement>())
   const lastDetailTrigger=useRef<string|null>(null)
@@ -42,7 +39,7 @@ export function MistakeLibraryWorkspace({onBack,onOpenGame}:Props){
   const openDetail=(id:string)=>{lastDetailTrigger.current=id;void library.openDetail(id)}
   const closeDetail=()=>{library.closeDetail();const id=lastDetailTrigger.current;if(id)rowRefs.current.get(id)?.focus()}
   const selectedItems=library.items.filter(item=>library.selected.has(item.id))
-  const activeFilterCount=secondaryQueryKeys.filter(key=>key==='lifecycle'?library.query.lifecycle!=='active':library.query[key]!== '').length
+  const hasSecondaryFilters=Boolean(library.query.side||library.query.reason||library.query.tag||library.query.practice_state||library.query.lifecycle!=='active')
   const clearFilters=()=>library.setQuery({side:'',reason:'',tag:'',practice_state:'',lifecycle:'active'})
   const navigateRow=(item:SavedMistake,direction:-1|1)=>{
     const index=library.items.findIndex(candidate=>candidate.id===item.id)
@@ -60,17 +57,12 @@ export function MistakeLibraryWorkspace({onBack,onOpenGame}:Props){
     <section className="mistake-library-tools" aria-label="Mistake filters">
       <label className="mistake-filter mistake-search"><span>Player</span><input aria-label="Player name" value={library.query.player_name} onChange={event=>library.setQuery({player_name:event.target.value})} placeholder="White or Black player…" /></label>
       <label className="mistake-filter mistake-search"><span>Game or note</span><input value={library.query.query} onChange={event=>library.setQuery({query:event.target.value})} placeholder="Event, move, or note…" /></label>
-      <div className="mistake-filter-popover-wrap">
-        <button type="button" className="text-button mistake-filter-trigger" aria-expanded={filtersOpen} aria-controls="mistake-secondary-filters" onClick={()=>setFiltersOpen(open=>!open)}>Filters{activeFilterCount?` · ${activeFilterCount}`:''}</button>
-        {filtersOpen&&<div id="mistake-secondary-filters" className="mistake-filter-popover">
-          <div className="mistake-filter-popover-head"><strong>Refine this view</strong><button type="button" className="text-button" onClick={clearFilters} disabled={!activeFilterCount}>Clear filters</button></div>
-          <label className="mistake-filter"><span>Mistake made by</span><select aria-label="Mistake made by" value={library.query.side} onChange={event=>library.setQuery({side:event.target.value as typeof library.query.side})}><option value="">Either player</option><option value="white">White player</option><option value="black">Black player</option></select></label>
-          <label className="mistake-filter"><span>Why it was saved</span><select aria-label="Capture reason" value={library.query.reason} onChange={event=>library.setQuery({reason:event.target.value as typeof library.query.reason})}><option value="">All reasons</option><option value="high_cti_mistake">High-CTI mistake</option><option value="human_natural_blunder">Human-natural blunder</option></select></label>
-          <label className="mistake-filter"><span>Your tag</span><select aria-label="Tag" value={library.query.tag} onChange={event=>library.setQuery({tag:event.target.value})}><option value="">All tags</option>{library.tags.map(tag=><option key={tag.id} value={tag.name}>{tag.name}</option>)}</select></label>
-          <label className="mistake-filter"><span>Practice state</span><select aria-label="Practice state" value={library.query.practice_state} onChange={event=>library.setQuery({practice_state:event.target.value as typeof library.query.practice_state})}><option value="">Any state</option><option value="again">Needs another look</option><option value="understood">Understood</option></select></label>
-          <label className="mistake-filter"><span>Library state</span><select aria-label="Library state" value={library.query.lifecycle} onChange={event=>library.setQuery({lifecycle:event.target.value as typeof library.query.lifecycle})}><option value="active">Active mistakes</option><option value="archived">Archive</option></select></label>
-        </div>}
-      </div>
+      <label className="mistake-filter"><span>Side</span><select aria-label="Mistake made by" value={library.query.side} onChange={event=>library.setQuery({side:event.target.value as typeof library.query.side})}><option value="">Either</option><option value="white">White</option><option value="black">Black</option></select></label>
+      <label className="mistake-filter"><span>Reason</span><select aria-label="Capture reason" value={library.query.reason} onChange={event=>library.setQuery({reason:event.target.value as typeof library.query.reason})}><option value="">All reasons</option><option value="high_cti_mistake">High CTI</option><option value="human_natural_blunder">Natural blunder</option></select></label>
+      <label className="mistake-filter"><span>Tag</span><select aria-label="Tag" value={library.query.tag} onChange={event=>library.setQuery({tag:event.target.value})}><option value="">All tags</option>{library.tags.map(tag=><option key={tag.id} value={tag.name}>{tag.name}</option>)}</select></label>
+      <label className="mistake-filter"><span>Practice</span><select aria-label="Practice state" value={library.query.practice_state} onChange={event=>library.setQuery({practice_state:event.target.value as typeof library.query.practice_state})}><option value="">Any state</option><option value="again">Needs review</option><option value="understood">Understood</option></select></label>
+      <label className="mistake-filter"><span>State</span><select aria-label="Library state" value={library.query.lifecycle} onChange={event=>library.setQuery({lifecycle:event.target.value as typeof library.query.lifecycle})}><option value="active">Active</option><option value="archived">Archive</option></select></label>
+      <button type="button" className="text-button mistake-clear-filters" onClick={clearFilters} disabled={!hasSecondaryFilters}>Clear</button>
     </section>
     {library.error&&<div className="review-alert mistake-library-alert" role="alert">{library.error}<button type="button" className="text-button" onClick={()=>void library.refresh()}>Retry</button></div>}
     <div className="mistake-library-layout">
@@ -94,7 +86,6 @@ function MistakeDetail({item,tags,saving,activeView,compact,onViewChange,onClose
   const [solutionRevealed,setSolutionRevealed]=useState(false)
   const [lineOpen,setLineOpen]=useState(false)
   const [historyPage,setHistoryPage]=useState(0)
-  const [moreOpen,setMoreOpen]=useState(false)
   const solutionRegionId=useId()
   const panelRef=useRef<HTMLElement>(null)
   const tabListRef=useRef<HTMLDivElement>(null)
@@ -134,7 +125,10 @@ function MistakeDetail({item,tags,saving,activeView,compact,onViewChange,onClose
         {activeView==='notes'&&<NotesTagsView item={item} note={note} tags={tags} onNoteChange={setNote} onSaveNote={onSaveNote} onSaveTags={onSaveTags}/>} 
         {activeView==='history'&&<HistoryView item={item} page={historyPage} onPageChange={setHistoryPage}/>} 
       </div>
-      <footer className="mistake-detail-actions"><div><button type="button" className="primary-button" onClick={onPractice}>Practice</button><button type="button" className="text-button" onClick={onOpenGame}>Open full game</button></div><div className="mistake-more-menu"><button type="button" className="text-button" aria-expanded={moreOpen} aria-controls="mistake-more-actions" onClick={()=>setMoreOpen(open=>!open)}>More</button>{moreOpen&&<div id="mistake-more-actions" role="menu"><button type="button" role="menuitem" onClick={()=>{setMoreOpen(false);onLifecycle()}}>{item.lifecycle==='active'?'Archive':'Restore'}</button><button type="button" role="menuitem" className="danger-button" onClick={()=>{setMoreOpen(false);onDelete()}}>Delete mistake</button></div>}</div></footer>
+      <footer className="mistake-detail-actions">
+        <div className="mistake-detail-primary-actions"><button type="button" className="primary-button" onClick={onPractice}>Practice</button><button type="button" className="text-button" onClick={onOpenGame}>Open full game</button></div>
+        <div className="mistake-detail-management-actions"><button type="button" className="text-button" onClick={onLifecycle}>{item.lifecycle==='active'?'Archive':'Restore'}</button><button type="button" className="danger-button" aria-label="Delete mistake" onClick={onDelete}>Delete</button></div>
+      </footer>
       <small className="mistake-saving-status" aria-live="polite">{saving?'Saving locally…':'Stored locally · full game preserved'}</small>
     </aside>
     {lineOpen&&<BestLineDialog item={item} onClose={()=>setLineOpen(false)}/>} 
