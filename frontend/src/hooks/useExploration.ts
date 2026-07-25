@@ -126,7 +126,7 @@ export function useExploration() {
       san: string,
       preFen: string,
       fenAfter: string,
-      depth: number = 12,
+      depth: number = 18,
       acceptableDrop: number = 0.5,
     ) => {
       const seq = ++evalSeqRef.current;

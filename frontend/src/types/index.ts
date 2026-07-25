@@ -116,7 +116,21 @@ export interface AnalysisCompleteEvent {
   analysis_history: AnalysisHistoryEntry[];
 }
 
-export type AnalysisSSEEvent = AnalysisProgressEvent | AnalysisCompleteEvent;
+export interface AnalysisErrorEvent {
+  type: 'error';
+  message: string;
+  error_type?: string;
+}
+
+export interface AnalysisHeartbeatEvent {
+  type: 'heartbeat';
+}
+
+export type AnalysisSSEEvent =
+  | AnalysisProgressEvent
+  | AnalysisCompleteEvent
+  | AnalysisErrorEvent
+  | AnalysisHeartbeatEvent;
 
 export interface ParsedMove {
   index: number;

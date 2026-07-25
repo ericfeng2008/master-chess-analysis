@@ -81,7 +81,7 @@ export function AnalyzerPage() {
 
   const [acceptableDrop, setAcceptableDrop] = useState(0.5);
   const [minefieldThreshold, setMinefieldThreshold] = useState(0.8);
-  const [engineDepth, setEngineDepth] = useState(12);
+  const [engineDepth, setEngineDepth] = useState(18);
   const [showConfig, setShowConfig] = useState(true);
 
   const [blunderThreshold, setBlunderThreshold] = useState(1.0);
@@ -95,7 +95,7 @@ export function AnalyzerPage() {
   const restoreStoredAnalysis = (game: StoredGame, selectedPly = 0) => {
     setAcceptableDrop(storedNumber(game.request.acceptable_drop, 0.5));
     setMinefieldThreshold(storedNumber(game.request.minefield_threshold, 0.8));
-    setEngineDepth(storedNumber(game.request.engine_depth, 12));
+    setEngineDepth(storedNumber(game.request.engine_depth, 18));
     setBlunderThreshold(storedNumber(game.request.blunder_threshold, 1));
     setMbiTrapThreshold(storedNumber(game.request.mbi_trap_threshold, 0.4));
     setMbiOutlierThreshold(storedNumber(game.request.mbi_outlier_threshold, 0.05));

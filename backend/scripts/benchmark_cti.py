@@ -133,7 +133,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stockfish", default=settings.stockfish_path)
     parser.add_argument("--checkpoint", default=MAIA3_CHECKPOINT_PATH)
-    parser.add_argument("--depth", type=int, default=12)
+    parser.add_argument("--depth", type=int, default=18)
     parser.add_argument("--elo", type=int, default=DEFAULT_MAIA3_ELO)
     parser.add_argument("--minefield-threshold", type=float, default=0.8)
     asyncio.run(run(parser.parse_args()))

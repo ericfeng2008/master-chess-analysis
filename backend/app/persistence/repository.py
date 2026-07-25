@@ -281,6 +281,116 @@ class AnalysisRepository:
             ).fetchone()
         return self._analysis_run(row) if row else None
 
+    def find_analysis_checkpoint(
+        self, game_id: str, compatibility_digest: str
+    ) -> dict[str, Any] | None:
+        """Return the newest resumable prefix for an analysis request."""
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM analysis_checkpoints
+                   WHERE game_id=? AND analysis_fingerprint=?
+                   ORDER BY updated_at DESC,id DESC LIMIT 1""",
+                (game_id, compatibility_digest),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "game_id": row["game_id"],
+            "analysis_fingerprint": row["analysis_fingerprint"],
+            "pgn_fingerprint": row["pgn_fingerprint"],
+            "normalized_pgn": row["normalized_pgn"],
+            "request": json_loads(row["request_json"], {}),
+            "engine": json_loads(row["engine_json"], {}),
+            "maia": json_loads(row["maia_json"], {}),
+            "metric_schema_version": row["metric_schema_version"],
+            "result": json_loads(row["result_json"], {}),
+            "moves_analyzed": row["moves_analyzed"],
+            "total_moves": row["total_moves"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def save_analysis_checkpoint(
+        self,
+        *,
+        game_id: str,
+        analysis_fingerprint: str,
+        pgn_fingerprint: str,
+        normalized_pgn: str,
+        request: dict[str, Any],
+        engine: dict[str, Any],
+        maia: dict[str, Any],
+        metric_schema_version: int,
+        result: dict[str, Any],
+        moves_analyzed: int,
+        total_moves: int,
+    ) -> str:
+        """Atomically upsert a partial analysis result for later resumption."""
+
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                """SELECT id FROM analysis_checkpoints
+                   WHERE game_id=? AND analysis_fingerprint=?""",
+                (game_id, analysis_fingerprint),
+            ).fetchone()
+            checkpoint_id = str(row["id"]) if row else str(uuid.uuid4())
+            if row:
+                connection.execute(
+                    """UPDATE analysis_checkpoints SET
+                       pgn_fingerprint=?,normalized_pgn=?,request_json=?,engine_json=?,
+                       maia_json=?,metric_schema_version=?,result_json=?,moves_analyzed=?,
+                       total_moves=?,updated_at=? WHERE id=?""",
+                    (
+                        pgn_fingerprint,
+                        normalized_pgn,
+                        json_dumps(request),
+                        json_dumps(engine),
+                        json_dumps(maia),
+                        metric_schema_version,
+                        json_dumps(result),
+                        moves_analyzed,
+                        total_moves,
+                        now,
+                        checkpoint_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """INSERT INTO analysis_checkpoints (
+                       id,game_id,analysis_fingerprint,pgn_fingerprint,normalized_pgn,
+                       request_json,engine_json,maia_json,metric_schema_version,result_json,
+                       moves_analyzed,total_moves,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        checkpoint_id,
+                        game_id,
+                        analysis_fingerprint,
+                        pgn_fingerprint,
+                        normalized_pgn,
+                        json_dumps(request),
+                        json_dumps(engine),
+                        json_dumps(maia),
+                        metric_schema_version,
+                        json_dumps(result),
+                        moves_analyzed,
+                        total_moves,
+                        now,
+                        now,
+                    ),
+                )
+        return checkpoint_id
+
+    def delete_analysis_checkpoint(self, game_id: str, analysis_fingerprint: str) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                """DELETE FROM analysis_checkpoints
+                   WHERE game_id=? AND analysis_fingerprint=?""",
+                (game_id, analysis_fingerprint),
+            )
+
     def create_analysis_run(self, snapshot: AnalysisRunSnapshot) -> str:
         game = self.resolve_game(snapshot.game_id, snapshot.normalized_pgn)
         game_id = str(game["id"])

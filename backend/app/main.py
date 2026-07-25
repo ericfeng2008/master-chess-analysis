@@ -15,6 +15,7 @@ from app.config import (
 from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 from app.persistence import AnalysisRepository, Database, DatabaseUnavailableError
+from app.analysis.jobs import AnalysisJobManager
 from app.routers.analysis_router import router as analysis_router
 from app.mistakes import MistakeRepository
 from app.routers.mistake_router import router as mistake_router
@@ -28,6 +29,7 @@ stockfish_lock = threading.Lock()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.analysis_jobs = AnalysisJobManager()
     database = Database(settings.database_path)
     try:
         database.initialize()
@@ -59,7 +61,9 @@ async def lifespan(app: FastAPI):
     )
     app.state.stockfish_lock = stockfish_lock
     yield
-    # Shutdown: close engines (maia first to stop accepting predict() calls)
+    # Shutdown workers before closing shared engines.
+    app.state.analysis_jobs.shutdown()
+    # Maia is closed first once no analysis worker can call it.
     await app.state.maia.close()
     app.state.stockfish.close()
     app.state.database.close()
