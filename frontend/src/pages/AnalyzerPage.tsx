@@ -700,44 +700,31 @@ export function AnalyzerPage() {
   );
 }
 
-function IntroPanel({ height }: { height: number | null }) {
+function IntroPanel({ height }: {
+  height: number | null
+}) {
   return (
     <section className="panel panel-radius panel-pad intro-panel" style={height ? { height } : undefined}>
       <div className="intro-hero">
-        <span className="intro-kicker">Local analysis</span>
-        <h2>Chess Review With Engine and Intuition</h2>
-        <p>
-          Review PGN games with objective Stockfish evaluation and Maia3 human move-likelihood
-          modeling. The analysis highlights practical difficulty, natural mistakes, intuition gaps,
-          and brilliant moves that are hard for humans to find.
-        </p>
+        <span className="intro-kicker">Your local study desk</span>
+        <h2>Choose where to begin.</h2>
+        <p>Games, analysis versions, and saved mistakes stay on this computer.</p>
       </div>
-
-      <div className="intro-metric-strip" aria-label="Analysis metrics">
-        <span>CTI</span>
-        <span>Minefields</span>
-        <span>MBI</span>
-        <span>EIG</span>
-        <span>BRI</span>
+      <div className="intro-workflow-grid">
+        <section className="intro-route intro-route-new" aria-labelledby="new-analysis-title">
+          <div><span>New analysis</span><h3 id="new-analysis-title">Turn one game into useful lessons.</h3></div>
+          <ol className="intro-flow" aria-label="New analysis workflow"><li>Upload PGN</li><li>Run analysis</li><li>Review</li><li>Save mistakes</li></ol>
+          <p><strong>Start beneath the board:</strong> upload a PGN, run the analysis, then save only the positions worth revisiting in the Mistake Library.</p>
+        </section>
+        <section className="intro-route intro-route-continue" aria-labelledby="continue-study-title">
+          <div><span>Continue local study</span><h3 id="continue-study-title">Resume the question you left behind.</h3></div>
+          <div className="intro-resume-options">
+            <p><strong>Saved game</strong><span>Use Open Saved Game beneath the board to restore an analysis review.</span></p>
+            <p><strong>Saved mistake</strong><span>Use Mistake Library in the page header to inspect, practice, or reopen the full game.</span></p>
+          </div>
+        </section>
       </div>
-
-      <div className="intro-grid">
-        <div>
-          <h3>1. Load a PGN</h3>
-          <p>Use Upload PGN below the board. The notation panel will show the game moves and PGN metadata.</p>
-        </div>
-        <div>
-          <h3>2. Run analysis</h3>
-          <p>Tune analysis settings if needed, then click Analyze. Everything runs locally on this machine.</p>
-        </div>
-        <div>
-          <h3>3. Review both players</h3>
-          <p>
-            After analysis, the timeline chart appears with CTI, minefields, MBI, EIG, and BRI metrics
-            for White and Black perspectives.
-          </p>
-        </div>
-      </div>
+      <p className="intro-persistence-note">Games and completed analyses stay local automatically. Saving mistakes is an explicit step after review.</p>
     </section>
   );
 }

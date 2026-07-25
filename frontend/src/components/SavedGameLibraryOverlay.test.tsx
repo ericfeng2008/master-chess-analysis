@@ -65,6 +65,8 @@ describe('SavedGameLibraryOverlay', () => {
     expect(list).not.toBeNull()
     expect(preview).not.toBeNull()
     expect(list?.contains(preview)).toBe(false)
+    expect(preview).toHaveAttribute('aria-label', 'Selected game details')
+    expect(preview?.querySelector('.saved-game-preview-actions')).not.toBeNull()
   })
 })
 

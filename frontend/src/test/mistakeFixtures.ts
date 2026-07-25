@@ -1,4 +1,4 @@
-import type { MistakeSuggestion, SavedMistake } from '../types/mistakes'
+import type { MistakeAttempt, MistakeSuggestion, SavedMistake } from '../types/mistakes'
 
 export const suggestion = (overrides:Partial<MistakeSuggestion>={}):MistakeSuggestion=>({
   analysis_run_id:'run-1',game_id:'game-1',mistake_fingerprint:'mistake-fingerprint-1',ply:12,move_number:7,side:'white',decision_fen:'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3',
@@ -10,4 +10,16 @@ export const suggestion = (overrides:Partial<MistakeSuggestion>={}):MistakeSugge
 
 export const savedMistake=(overrides:Partial<SavedMistake>={}):SavedMistake=>({
   ...suggestion(),id:'mistake-1',headers:{White:'Master',Black:'Opponent',Event:'Open'},game_created_at:'2026-01-01T00:00:00Z',note:'',tags:['Calculation horizon'],lifecycle:'active',last_practice_state:null,practice_count:0,last_practiced_at:null,attempts:[],created_at:'2026-01-01T00:00:00Z',updated_at:'2026-01-01T00:00:00Z',...overrides,
+})
+
+export const practiceAttempts=(count:number):MistakeAttempt[]=>Array.from({length:count},(_,index)=>({
+  id:`attempt-${index+1}`,mistake_id:'mistake-1',chosen_move:index%2?'Bb5':'Qe2',revealed_without_move:false,objective_acceptable:index%2===1,outcome:index%2?'understood':'again',revealed_at:`2026-01-${String(index+1).padStart(2,'0')}T00:00:00Z`,created_at:`2026-01-${String(index+1).padStart(2,'0')}T00:00:00Z`,
+}))
+
+export const denseMistake=()=>savedMistake({
+  headers:{White:'Master',Black:'Opponent',Event:'A deliberately long tournament title for checking truncation in the desktop mistake folio'},
+  tags:['Calculation horizon','Opponent resource','Forcing move','Endgame transition','Watch the back rank'],
+  evidence:{...savedMistake().evidence,best_line:['Bb5','Nf6','Nc3','d6','O-O','Be7','Re1','O-O','d4','Bd7','c3']},
+  attempts:practiceAttempts(5),
+  practice_count:5,
 })
