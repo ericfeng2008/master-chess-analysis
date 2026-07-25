@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -14,7 +15,7 @@ HISTORICAL_MAIA3_ELO = 2200
 
 class Settings(BaseSettings):
     stockfish_path: str = "/opt/homebrew/bin/stockfish"
-    default_engine_depth: int = 12
+    default_engine_depth: int = Field(default=18, ge=12, le=28)
     stockfish_threads: int = 0  # 0 = auto-detect (cpu_count - 1)
     stockfish_hash_mb: int = 256
     stockfish_search_cache_entries: int = 2048

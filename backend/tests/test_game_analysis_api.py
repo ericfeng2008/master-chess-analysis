@@ -23,7 +23,7 @@ OTHER = '[Event "Other"]\n\n1. d4 d5 *'
 
 
 class FakeStockfish:
-    depth = 12
+    depth = 18
 
     @property
     def identity(self):
@@ -35,7 +35,7 @@ class FakeStockfish:
             "hash_mb": 16,
         }
 
-    def evaluate_position(self, board, depth=12, acceptable_drop=0.5):
+    def evaluate_position(self, board, depth=18, acceptable_drop=0.5):
         return {
             "eval": 0.25,
             "best_move": "e4",

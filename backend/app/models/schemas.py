@@ -41,7 +41,7 @@ class AnalyzeRequest(BaseModel):
     game_id: str | None = None
     acceptable_drop: float = Field(default=0.5, ge=0.0)
     minefield_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
-    engine_depth: int = Field(default=12, ge=10, le=20)
+    engine_depth: int = Field(default=18, ge=12, le=28)
     blunder_threshold: float = Field(default=1.0, ge=0.5, le=3.0)
     mbi_trap_threshold: float = Field(default=0.40, ge=0.10, le=0.80)
     mbi_outlier_threshold: float = Field(default=0.05, ge=0.01, le=0.20)
@@ -123,7 +123,8 @@ class ErrorResponse(BaseModel):
 
 class EvaluatePositionRequest(BaseModel):
     fen: str
-    depth: int = Field(default=12, ge=10, le=20)
+    # Depth 10 remains supported for the internal lazy variation-detail path.
+    depth: int = Field(default=18, ge=10, le=28)
     acceptable_drop: float = Field(default=0.5, ge=0.0)
     purpose: Literal["exploration", "variation_detail"] = "exploration"
 

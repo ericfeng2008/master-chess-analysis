@@ -1,4 +1,6 @@
 import json
+import asyncio
+import queue
 import threading
 from dataclasses import asdict
 
@@ -7,13 +9,14 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.analysis.analyzer import analyze_game
+from app.analysis.jobs import DONE, AnalysisJob, AnalysisJobManager
 from app.analysis.diagnostics import (
     AnalysisDiagnostics,
     activate_diagnostics,
     diagnostic_scope,
     diagnostic_stage,
 )
-from app.analysis.data_models import AnalysisCompleteEvent, AnalysisProgressEvent
+from app.analysis.data_models import AnalysisCompleteEvent, AnalysisMoveData, AnalysisProgressEvent
 from app.engines.maia3_client import Maia3Client
 from app.engines.stockfish_client import StockfishClient
 from app.models.schemas import AnalyzeRequest, EvaluatePositionRequest, EvaluatePositionResponse, PgnUploadResponse
@@ -69,6 +72,36 @@ def _complete_event(
         }
     )
     return f"data: {data}\n\n"
+
+
+def _job_manager(req: Request) -> AnalysisJobManager:
+    manager = getattr(req.app.state, "analysis_jobs", None)
+    if manager is None:
+        # Tests and lightweight embedding apps do not run the application
+        # lifespan. Keep those callers on the same production code path.
+        manager = AnalysisJobManager()
+        req.app.state.analysis_jobs = manager
+    return manager
+
+
+async def _job_stream(job: AnalysisJob):
+    """Stream job events without tying the worker lifetime to the client."""
+
+    subscriber, unsubscribe = job.subscribe()
+    try:
+        while True:
+            try:
+                event = await asyncio.to_thread(subscriber.get, True, 10.0)
+            except queue.Empty:
+                # Send a real SSE data frame so proxies that discard comment
+                # frames still observe activity during a deep search.
+                yield 'data: {"type":"heartbeat"}\n\n'
+                continue
+            if event is DONE:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+    finally:
+        unsubscribe()
 
 
 @router.post("/api/upload-pgn", response_model=PgnUploadResponse)
@@ -198,6 +231,12 @@ async def analyze(request: AnalyzeRequest, req: Request):
             )
             cached = repository.find_compatible_analysis(game_id, compatibility_digest)
             if cached is not None:
+                # A completed run wins over any stale checkpoint left by a
+                # crash between result commit and checkpoint cleanup.
+                try:
+                    repository.delete_analysis_checkpoint(game_id, compatibility_digest)
+                except Exception:
+                    pass
                 history = repository.analysis_history(game_id)
 
                 def cached_stream():
@@ -230,10 +269,43 @@ async def analyze(request: AnalyzeRequest, req: Request):
             )
             repository = None
 
-    def event_stream():
-        # Set the requested analysis depth on the shared engine instance.
-        # The lock serialises engine access across concurrent requests.
+    # A checkpoint is keyed by the same provenance digest as the completed
+    # cache. It is intentionally separate from analysis_runs so incomplete
+    # work never becomes the preferred Mistake Library run.
+    checkpoint = None
+    initial_moves: list[AnalysisMoveData] = []
+    initial_minefields: list[int] = []
+    if repository is not None and game_id is not None and compatibility_digest is not None:
+        checkpoint = repository.find_analysis_checkpoint(game_id, compatibility_digest)
+        if checkpoint is not None:
+            result = checkpoint.get("result", {})
+            raw_moves = result.get("moves", []) if isinstance(result, dict) else []
+            try:
+                initial_moves = [AnalysisMoveData(**move) for move in raw_moves]
+                initial_minefields = [int(ply) for ply in result.get("minefields", [])]
+            except (TypeError, ValueError):
+                # A malformed/stale checkpoint is safe to discard; the fresh
+                # run will rebuild it from the beginning.
+                initial_moves = []
+                initial_minefields = []
+
+    job_key = compatibility_digest or f"volatile:{hash((parsed.normalized_pgn, request.model_dump_json()))}"
+    manager = _job_manager(req)
+
+    def run_analysis(job: AnalysisJob) -> None:
         diagnostics = AnalysisDiagnostics("full_analysis")
+        # Tell a newly attached client where a durable prefix starts. This is
+        # also useful after the original browser tab was reloaded.
+        if initial_moves:
+            job.publish(
+                {
+                    "type": "progress",
+                    "moves_analyzed": len(initial_moves),
+                    "total_moves": checkpoint.get("total_moves", len(parsed.mainline_uci)) if checkpoint else len(parsed.mainline_uci),
+                    "minefields_found": len(initial_minefields),
+                }
+            )
+
         with lock:
             original_depth = stockfish.depth
             stockfish.depth = request.engine_depth
@@ -250,25 +322,54 @@ async def analyze(request: AnalyzeRequest, req: Request):
                 bri_threshold=request.bri_threshold,
                 maia3_white_elo=request.maia3_white_elo,
                 maia3_black_elo=request.maia3_black_elo,
+                initial_moves=initial_moves,
+                initial_minefields=initial_minefields,
+                start_index=len(initial_moves),
             )
             try:
                 while True:
                     try:
-                        # Starlette may resume a sync body iterator in a fresh
-                        # context for each chunk, so activate only around the
-                        # work that advances the analysis generator.
                         with activate_diagnostics(diagnostics):
                             event = next(events)
                     except StopIteration:
                         break
                     if isinstance(event, AnalysisProgressEvent):
-                        data = json.dumps({
-                            "type": "progress",
-                            "moves_analyzed": event.moves_analyzed,
-                            "total_moves": event.total_moves,
-                            "minefields_found": event.minefields_found,
-                        })
-                        yield f"data: {data}\n\n"
+                        if (
+                            repository is not None
+                            and game_id is not None
+                            and compatibility_digest is not None
+                            and event.moves is not None
+                        ):
+                            try:
+                                repository.save_analysis_checkpoint(
+                                    game_id=game_id,
+                                    analysis_fingerprint=compatibility_digest,
+                                    pgn_fingerprint=str(logical_game["game_fingerprint"]),
+                                    normalized_pgn=parsed.normalized_pgn,
+                                    request=request.model_dump(),
+                                    engine=engine_identity,
+                                    maia=maia_identity,
+                                    metric_schema_version=METRIC_SCHEMA_VERSION,
+                                    result={
+                                        "moves": [asdict(move) for move in event.moves],
+                                        "minefields": event.minefields or [],
+                                    },
+                                    moves_analyzed=event.moves_analyzed,
+                                    total_moves=event.total_moves,
+                                )
+                            except Exception as exc:
+                                # A disk/database issue must not terminate a
+                                # valuable engine run; completion persistence
+                                # will surface the warning to the UI.
+                                diagnostics.emit("checkpoint_failure", type(exc).__name__)
+                        job.publish(
+                            {
+                                "type": "progress",
+                                "moves_analyzed": event.moves_analyzed,
+                                "total_moves": event.total_moves,
+                                "minefields_found": event.minefields_found,
+                            }
+                        )
                     elif isinstance(event, AnalysisCompleteEvent):
                         with activate_diagnostics(diagnostics):
                             with diagnostic_stage("result_finalization"):
@@ -287,6 +388,8 @@ async def analyze(request: AnalyzeRequest, req: Request):
                                             game_id=game_id,
                                         )
                                         analysis_run_id = repository.create_analysis_run(snapshot)
+                                        if game_id is not None and compatibility_digest is not None:
+                                            repository.delete_analysis_checkpoint(game_id, compatibility_digest)
                                     except Exception as exc:
                                         persistence_warning = (
                                             "Analysis completed, but the local Mistake Library cannot "
@@ -297,16 +400,19 @@ async def analyze(request: AnalyzeRequest, req: Request):
                                     if repository is not None and game_id is not None
                                     else []
                                 )
-                                complete_event = _complete_event(
-                                    moves=moves_data,
-                                    minefields=event.minefields,
-                                    analysis_run_id=analysis_run_id,
-                                    game_id=game_id,
-                                    cache_hit=False,
-                                    analysis_history=history,
-                                    persistence_warning=persistence_warning,
+                                job.publish(
+                                    {
+                                        "type": "complete",
+                                        "moves": moves_data,
+                                        "minefields": event.minefields,
+                                        "analysis_run_id": analysis_run_id,
+                                        "game_id": game_id,
+                                        "cache_hit": False,
+                                        "analysis_history": history,
+                                        "persistence_warning": persistence_warning,
+                                    }
                                 )
-                        yield complete_event
+                        break
             except BaseException as exc:
                 diagnostics.emit("failure", type(exc).__name__)
                 raise
@@ -315,7 +421,16 @@ async def analyze(request: AnalyzeRequest, req: Request):
             finally:
                 stockfish.depth = original_depth
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    job = manager.get_or_start(job_key, run_analysis)
+    return StreamingResponse(
+        _job_stream(job),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/api/evaluate-position", response_model=EvaluatePositionResponse)

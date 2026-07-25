@@ -26,7 +26,7 @@ class StockfishClient:
     def __init__(
         self,
         path: str,
-        depth: int = 20,
+        depth: int = 18,
         threads: int = 0,
         hash_mb: int = 256,
         search_cache_entries: int = 2048,
@@ -499,7 +499,7 @@ class StockfishClient:
     def evaluate_position(
         self,
         board: chess.Board,
-        depth: int = 12,
+        depth: int = 18,
         acceptable_drop: float = 0.5,
     ) -> dict:
         """Evaluate a single position for on-demand exploration.

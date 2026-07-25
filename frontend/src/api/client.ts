@@ -118,7 +118,7 @@ export function ssePost(
 
 export async function evaluatePosition(
   fen: string,
-  depth: number = 12,
+  depth: number = 18,
   acceptableDrop: number = 0.5,
   purpose: 'exploration' | 'variation_detail' = 'exploration',
 ): Promise<PositionEvalResult> {

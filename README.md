@@ -129,7 +129,7 @@ If your engines are installed in non-default locations, or you want to tune engi
 | Variable | Default | Description |
 |---|---|---|
 | `ANALYSIS_STOCKFISH_PATH` | `/opt/homebrew/bin/stockfish` | Path to Stockfish binary |
-| `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `12` | Backend fallback Stockfish search depth (higher = more accurate but slower) |
+| `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `18` | Backend fallback Stockfish search depth (12-28; higher = more accurate but slower) |
 | `ANALYSIS_STOCKFISH_THREADS` | `0` (auto) | CPU threads for Stockfish (`0` = auto-detect: `cpu_count - 1`) |
 | `ANALYSIS_STOCKFISH_HASH_MB` | `256` | Stockfish hash table size in MB (more = better for deep analysis) |
 | `ANALYSIS_STOCKFISH_SEARCH_CACHE_ENTRIES` | `2048` | Maximum exact process-local Stockfish best/root search results retained in the LRU cache (`0` disables it) |
@@ -159,7 +159,7 @@ The **Analysis Configuration** panel displays 8 configurable sliders organized i
 The game information area also provides separate **White Maia3** and **Black Maia3** Elo controls. Both default to `2600` for new and unanalyzed games; select the ratings that best represent each player before starting analysis. Reopening an analyzed game restores the ratings that were actually used for that saved run.
 
 **Left column:**
-- **Stockfish Engine Depth** (10-20, default 12): Higher depth = more accurate but slower analysis
+- **Stockfish Engine Depth** (12-28, default 18): Higher depth = more accurate but slower analysis
 - **CTI: Acceptable Drop** (0.1-2.0, default 0.5): Maximum eval drop (in pawns) for a move to count as "good" in CTI computation
 - **CTI: Minefield Threshold** (0.50-1.00, default 0.80): CTI value above which a position is flagged as a minefield
 - **MBI: Blunder Threshold** (0.5-3.0, default 1.0): Minimum eval drop (in pawns) to classify a move as a blunder
@@ -257,7 +257,7 @@ Game identity is deliberately based on the initial position and ordered mainline
 
 ### Storage, Migration, and Privacy
 
-Games, versioned analyses, saved mistakes, tags, and attempts use `backend/data/master-chess-analysis.db` by default. Existing databases are upgraded transactionally to schema 6. Before upgrading an existing schema, the backend creates a sibling backup named like `master-chess-analysis.db.pre-v5-to-v6.bak`. Analysis runs are grouped by the canonical game fingerprint, while unparsable legacy rows remain preserved and are reported as non-cacheable instead of being deleted.
+Games, versioned analyses, saved mistakes, tags, and attempts use `backend/data/master-chess-analysis.db` by default. Existing databases are upgraded transactionally to schema 7. Before upgrading an existing schema, the backend creates a sibling backup named like `master-chess-analysis.db.pre-v6-to-v7.bak`. Analysis runs are grouped by the canonical game fingerprint, while unparsable legacy rows remain preserved and are reported as non-cacheable instead of being deleted. Long-running analysis runs in a background worker and sends independent SSE heartbeats; progress checkpoints are stored separately and resumed when the same game/settings are analyzed again after a browser or backend reconnect.
 
 Legacy saved mistakes are replayed against their game mainline to backfill stable played-decision identities. If equivalent analysis runs already contain duplicate saved mistakes, migration keeps a deterministic canonical item, unions tags and attempts, preserves distinct notes and evidence in traceable migration metadata, and records retired IDs. Items that cannot be validated safely remain untouched and are reported for diagnosis.
 
@@ -347,7 +347,7 @@ When a forced checkmate exists, the position info shows `#N` (White mates in N) 
 
 | Parameter | Default | Range | Description |
 |---|---|---|---|
-| Stockfish Engine Depth | 12 | 10-20 | Search depth for Stockfish analysis |
+| Stockfish Engine Depth | 18 | 12-28 | Search depth for Stockfish analysis |
 | CTI: Acceptable Drop | 0.5 | 0.1-2.0 | Max eval drop (pawns) for a move to be "good" |
 | CTI: Minefield Threshold | 0.80 | 0.50-1.00 | CTI above this flags a minefield |
 | MBI: Blunder Threshold | 1.0 | 0.5-3.0 | Min eval drop (pawns) to classify as blunder |

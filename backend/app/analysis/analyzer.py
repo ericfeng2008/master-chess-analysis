@@ -43,6 +43,9 @@ def analyze_game(
     bri_threshold: float = 0.05,
     maia3_white_elo: int = DEFAULT_MAIA3_ELO,
     maia3_black_elo: int = DEFAULT_MAIA3_ELO,
+    initial_moves: list[AnalysisMoveData] | None = None,
+    initial_minefields: list[int] | None = None,
+    start_index: int = 0,
 ) -> Generator[AnalysisProgressEvent | AnalysisCompleteEvent, None, None]:
     """Analyze every position in a PGN game, yielding SSE-streaming events.
 
@@ -105,8 +108,14 @@ def analyze_game(
         half_move += 1
 
     total = len(positions)
-    move_results: list[AnalysisMoveData] = []
-    minefields: list[int] = []
+    move_results: list[AnalysisMoveData] = list(initial_moves or [])
+    minefields: list[int] = list(initial_minefields or [])
+    # Checkpoints are written only at event boundaries, so a mismatched or
+    # stale prefix must never make the analyzer skip a real position.
+    if start_index < 0 or start_index != len(move_results) or start_index > total:
+        start_index = 0
+        move_results = []
+        minefields = []
 
     # prev_eval carries the eval from one position to the next to avoid
     # redundant Phase-1 probes. It is stored from the NEXT side-to-move's
@@ -114,12 +123,13 @@ def analyze_game(
     prev_eval: float | None = None
 
     # Mate-in-N values (side-to-move perspective) for the post-processing pass
-    mate_stm_per_pos: list[int | None] = []
+    mate_stm_per_pos: list[int | None] = [None] * start_index
 
     # Reuse Maia policy calls across positions within this analysis.
     maia_policy_cache: MaiaPolicyCache = {}
 
-    for idx, (board, move, move_number, side, position_history_fens) in enumerate(positions):
+    for idx in range(start_index, total):
+        board, move, move_number, side, position_history_fens = positions[idx]
         is_white = side == "white"
 
         # Core CTI computation (also provides engine-evals and Maia policy
@@ -334,7 +344,13 @@ def analyze_game(
 
         # Emit progress events every 5 moves and on the final move
         if (idx + 1) % 5 == 0 or idx == total - 1:
-            yield AnalysisProgressEvent(idx + 1, total, len(minefields))
+            yield AnalysisProgressEvent(
+                idx + 1,
+                total,
+                len(minefields),
+                moves=list(move_results),
+                minefields=list(minefields),
+            )
 
     # ----- Post-processing: fill in eval_after and mate_in -----
     # eval_after[i] = stockfish_eval[i+1] (Lichess convention).

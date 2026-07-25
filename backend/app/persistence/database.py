@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class DatabaseUnavailableError(RuntimeError):
@@ -501,6 +501,28 @@ ALTER TABLE games ADD COLUMN metadata_overrides_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE games ADD COLUMN metadata_updated_at TEXT;
 """
 
+MIGRATION_7 = """
+CREATE TABLE analysis_checkpoints (
+    id TEXT PRIMARY KEY,
+    game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    analysis_fingerprint TEXT NOT NULL,
+    pgn_fingerprint TEXT NOT NULL,
+    normalized_pgn TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    engine_json TEXT NOT NULL,
+    maia_json TEXT NOT NULL,
+    metric_schema_version INTEGER NOT NULL,
+    result_json TEXT NOT NULL,
+    moves_analyzed INTEGER NOT NULL CHECK(moves_analyzed >= 0),
+    total_moves INTEGER NOT NULL CHECK(total_moves >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(game_id, analysis_fingerprint)
+);
+CREATE INDEX analysis_checkpoints_updated_idx
+ON analysis_checkpoints(updated_at DESC);
+"""
+
 MIGRATIONS = {
     1: MIGRATION_1,
     2: MIGRATION_2,
@@ -508,6 +530,7 @@ MIGRATIONS = {
     4: MIGRATION_4,
     5: MIGRATION_5,
     6: MIGRATION_6,
+    7: MIGRATION_7,
 }
 
 

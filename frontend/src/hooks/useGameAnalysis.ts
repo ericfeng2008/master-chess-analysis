@@ -101,10 +101,27 @@ export function useGameAnalysis() {
               },
               selectedMoveIndex: event.moves.length > 0 ? 0 : null,
             }));
+          } else if (event.type === 'error') {
+            setState((s: GameAnalysisState) => ({
+              ...s,
+              isAnalyzing: false,
+              error: event.message ?? 'Analysis worker failed',
+            }));
           }
         },
         (err) => {
           setState((s: GameAnalysisState) => ({ ...s, isAnalyzing: false, error: err.message }));
+        },
+        () => {
+          setState((s: GameAnalysisState) =>
+            s.isAnalyzing
+              ? {
+                  ...s,
+                  isAnalyzing: false,
+                  error: 'Analysis connection ended before completion; reload or retry to resume from the latest checkpoint.',
+                }
+              : s,
+          );
         },
       );
 

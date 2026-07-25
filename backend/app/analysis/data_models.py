@@ -151,6 +151,11 @@ class AnalysisProgressEvent:
     moves_analyzed: int
     total_moves: int
     minefields_found: int
+    # A checkpoint payload is attached at progress boundaries.  Keeping it on
+    # the domain event lets the background worker persist a consistent prefix
+    # without asking the engine for any additional work.
+    moves: list[AnalysisMoveData] | None = None
+    minefields: list[int] | None = None
 
 
 @dataclass
