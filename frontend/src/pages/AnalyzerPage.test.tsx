@@ -333,9 +333,21 @@ describe("AnalyzerPage evaluation bar integration", () => {
     rerender(<AnalyzerPage />);
     expect(screen.getByRole("meter")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Mistake Library" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Mistake Library" })[0]);
     expect(screen.getByTestId("mistake-library-secondary-board")).toBeInTheDocument();
     expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+  });
+
+  it("guides new analysis and saved-study entry from the empty state", () => {
+    render(<AnalyzerPage />);
+    expect(screen.getByText("New analysis")).toBeInTheDocument();
+    expect(screen.getByText("Continue local study")).toBeInTheDocument();
+    expect(screen.getByText("Save mistakes")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Analysis metrics")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Upload PGN")).not.toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: "Open Saved Game" })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Mistake Library" })[1]);
+    expect(screen.getByTestId("mistake-library-secondary-board")).toBeInTheDocument();
   });
 
   it("keeps Position Info standalone and opens Save Mistakes from the completed Run Analysis header", () => {

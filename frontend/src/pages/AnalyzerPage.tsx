@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AnalysisMistakeDialog } from "../components/AnalysisMistakeDialog";
 import { AnalysisChart } from "../components/AnalysisChart";
 import { AnalysisChartLegend } from "../components/AnalysisChartLegend";
@@ -623,7 +623,12 @@ export function AnalyzerPage() {
                 />
               </section>
             ) : (
-              <IntroPanel height={boardColumnHeight} />
+              <IntroPanel
+                height={boardColumnHeight}
+                onFile={handlers.handleFile}
+                onOpenSavedGame={() => setSavedLibraryOpen(true)}
+                onOpenMistakeLibrary={() => setApplicationView("mistake-library")}
+              />
             )}
           </main>
 
@@ -700,43 +705,31 @@ export function AnalyzerPage() {
   );
 }
 
-function IntroPanel({ height }: { height: number | null }) {
+function IntroPanel({ height, onFile, onOpenSavedGame, onOpenMistakeLibrary }: {
+  height: number | null
+  onFile: (event: ChangeEvent<HTMLInputElement>) => void
+  onOpenSavedGame: () => void
+  onOpenMistakeLibrary: () => void
+}) {
   return (
     <section className="panel panel-radius panel-pad intro-panel" style={height ? { height } : undefined}>
       <div className="intro-hero">
-        <span className="intro-kicker">Local analysis</span>
-        <h2>Chess Review With Engine and Intuition</h2>
-        <p>
-          Review PGN games with objective Stockfish evaluation and Maia3 human move-likelihood
-          modeling. The analysis highlights practical difficulty, natural mistakes, intuition gaps,
-          and brilliant moves that are hard for humans to find.
-        </p>
+        <span className="intro-kicker">Your local study desk</span>
+        <h2>Choose where to begin.</h2>
+        <p>Games, analysis versions, and saved mistakes stay on this computer.</p>
       </div>
-
-      <div className="intro-metric-strip" aria-label="Analysis metrics">
-        <span>CTI</span>
-        <span>Minefields</span>
-        <span>MBI</span>
-        <span>EIG</span>
-        <span>BRI</span>
-      </div>
-
-      <div className="intro-grid">
-        <div>
-          <h3>1. Load a PGN</h3>
-          <p>Use Upload PGN below the board. The notation panel will show the game moves and PGN metadata.</p>
-        </div>
-        <div>
-          <h3>2. Run analysis</h3>
-          <p>Tune analysis settings if needed, then click Analyze. Everything runs locally on this machine.</p>
-        </div>
-        <div>
-          <h3>3. Review both players</h3>
-          <p>
-            After analysis, the timeline chart appears with CTI, minefields, MBI, EIG, and BRI metrics
-            for White and Black perspectives.
-          </p>
-        </div>
+      <div className="intro-workflow-grid">
+        <section className="intro-route intro-route-new" aria-labelledby="new-analysis-title">
+          <div><span>New analysis</span><h3 id="new-analysis-title">Turn one game into useful lessons.</h3></div>
+          <ol className="intro-flow" aria-label="New analysis workflow"><li>Upload PGN</li><li>Run analysis</li><li>Review</li><li>Save mistakes</li></ol>
+          <p>After review, save only the positions you want to revisit in the Mistake Library.</p>
+          <label className="primary-button intro-upload-action">Upload PGN<input type="file" accept=".pgn" className="hidden" onChange={onFile} /></label>
+        </section>
+        <section className="intro-route intro-route-continue" aria-labelledby="continue-study-title">
+          <div><span>Continue local study</span><h3 id="continue-study-title">Resume the question you left behind.</h3></div>
+          <p><strong>Open Saved Game</strong> restores analysis review. <strong>Mistake Library</strong> lets you inspect, practice, or reopen a saved position's full game.</p>
+          <div className="intro-route-actions"><button type="button" className="text-button" onClick={onOpenSavedGame}>Open Saved Game</button><button type="button" className="text-button" onClick={onOpenMistakeLibrary}>Mistake Library</button></div>
+        </section>
       </div>
     </section>
   );
