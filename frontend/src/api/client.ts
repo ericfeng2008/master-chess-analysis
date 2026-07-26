@@ -119,7 +119,7 @@ export function ssePost(
 export async function evaluatePosition(
   fen: string,
   depth: number = 18,
-  acceptableDrop: number = 0.5,
+  acceptableDrop: number = 0.3,
   purpose: 'exploration' | 'variation_detail' = 'exploration',
 ): Promise<PositionEvalResult> {
   return apiPost<PositionEvalResult>('/api/evaluate-position', {

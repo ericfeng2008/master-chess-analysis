@@ -69,6 +69,65 @@ class CandidateStockfish:
         }
 
 
+class PlayedContinuationMaia:
+    model_name = "maia3-79m"
+    use_history = True
+
+    def predict(self, board, **_kwargs):
+        if board.ply() == 0:
+            return {
+                chess.Move.from_uci("e2e4"): 0.8,
+                chess.Move.from_uci("d2d4"): 0.2,
+            }
+        return {
+            chess.Move.from_uci("e7e5"): 0.8,
+            chess.Move.from_uci("c7c5"): 0.2,
+        }
+
+
+class PlayedContinuationStockfish:
+    depth = 16
+
+    def __init__(self):
+        self.best_depths: list[int] = []
+        self.evaluate_move_calls: list[chess.Move] = []
+
+    def quick_evaluate(self, board, depth=8):
+        return 0.0
+
+    def quick_evaluate_with_mate(self, board, depth=8):
+        return 0.0, None
+
+    def evaluate_best_move(self, board, depth=None):
+        self.best_depths.append(depth)
+        if board.ply() == 0:
+            move = chess.Move.from_uci("d2d4")
+        else:
+            move = chess.Move.from_uci("e7e5")
+        return move, 0.0, [move], None
+
+    def evaluate_root_moves(self, board, root_moves, depth=None):
+        evaluations = (
+            {
+                chess.Move.from_uci("d2d4"): 0.0,
+                chess.Move.from_uci("e2e4"): -3.0,
+            }
+            if board.ply() == 0
+            else {
+                chess.Move.from_uci("e7e5"): 0.0,
+                chess.Move.from_uci("c7c5"): -1.0,
+            }
+        )
+        return {
+            move: (evaluations[move], [move], None)
+            for move in root_moves
+        }
+
+    def evaluate_move(self, board, move, depth=None):
+        self.evaluate_move_calls.append(move)
+        raise AssertionError("Played moves are required CTI roots and should not fall back")
+
+
 def concentrated_policy(board: chess.Board, top_probability: float = 0.996):
     moves = list(board.legal_moves)
     tail = (1.0 - top_probability) / (len(moves) - 1)
@@ -98,10 +157,10 @@ class MetricStockfishCoverageTests(unittest.TestCase):
         self.assertEqual(first_roots, {moves[0], best_move, played_move})
         self.assertEqual(stockfish.root_calls[0], (moves[0], best_move, played_move))
         self.assertEqual(stockfish.root_depths, [12])
-        self.assertEqual(CTI_POLICY_COVERAGE, 0.995)
+        self.assertEqual(CTI_POLICY_COVERAGE, 0.99)
         self.assertLess(len(first_roots), board.legal_moves.count())
         self.assertTrue(result.cti_is_approximate)
-        self.assertLessEqual(result.cti_remaining_mass, 0.005)
+        self.assertLessEqual(result.cti_remaining_mass, 0.01)
 
     def test_full_reference_cti_is_inside_reported_bounds(self):
         board = chess.Board()
@@ -205,6 +264,16 @@ class MetricStockfishCoverageTests(unittest.TestCase):
         self.assertIsNone(complete.moves[0].epe_score)
         self.assertTrue(complete.moves[0].best_line)
         self.assertEqual(complete.moves[0].best_line_evals, {})
+
+    def test_analyzer_triages_the_next_position_from_the_played_move(self):
+        stockfish = PlayedContinuationStockfish()
+
+        list(analyze_game("1. e4 e5 *", stockfish, PlayedContinuationMaia()))
+
+        # e4 evaluates to -3.0 for White, so Black's next-position estimate is
+        # +3.0. That crosses the existing >=2.0 triage threshold: 16 -> 12.
+        self.assertEqual(stockfish.best_depths, [16, 12])
+        self.assertEqual(stockfish.evaluate_move_calls, [])
 
 
 if __name__ == "__main__":

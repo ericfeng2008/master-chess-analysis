@@ -97,7 +97,7 @@ export function ConfigurationPanel({
             label="Stockfish Engine Depth"
             value={engineDepth}
             display={String(engineDepth)}
-            min={12}
+            min={16}
             max={28}
             step={1}
             onChange={setEngineDepth}
@@ -106,8 +106,8 @@ export function ConfigurationPanel({
             label="CTI: Acceptable Drop"
             value={acceptableDrop}
             display={acceptableDrop.toFixed(1)}
-            min={0.1}
-            max={2}
+            min={0.2}
+            max={0.4}
             step={0.1}
             onChange={setAcceptableDrop}
           />
@@ -115,8 +115,8 @@ export function ConfigurationPanel({
             label="CTI: Minefield Threshold"
             value={minefieldThreshold}
             display={minefieldThreshold.toFixed(2)}
-            min={0.5}
-            max={1}
+            min={0.8}
+            max={0.95}
             step={0.05}
             onChange={setMinefieldThreshold}
           />

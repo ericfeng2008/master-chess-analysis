@@ -129,7 +129,7 @@ If your engines are installed in non-default locations, or you want to tune engi
 | Variable | Default | Description |
 |---|---|---|
 | `ANALYSIS_STOCKFISH_PATH` | `/opt/homebrew/bin/stockfish` | Path to Stockfish binary |
-| `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `18` | Backend fallback Stockfish search depth (12-28; higher = more accurate but slower) |
+| `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `18` | Backend fallback Stockfish search depth (16-28; higher = more accurate but slower, and need more powerful CPU) |
 | `ANALYSIS_STOCKFISH_THREADS` | `0` (auto) | CPU threads for Stockfish (`0` = auto-detect: `cpu_count - 1`) |
 | `ANALYSIS_STOCKFISH_HASH_MB` | `256` | Stockfish hash table size in MB (more = better for deep analysis) |
 | `ANALYSIS_STOCKFISH_SEARCH_CACHE_ENTRIES` | `2048` | Maximum exact process-local Stockfish best/root search results retained in the LRU cache (`0` disables it) |

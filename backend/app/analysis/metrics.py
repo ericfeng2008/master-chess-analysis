@@ -117,7 +117,7 @@ def compute_cti(
     board: chess.Board,
     stockfish: StockfishClient,
     maia: Maia3Client,
-    acceptable_drop: float = 0.5,
+    acceptable_drop: float = 0.3,
     prev_eval: float | None = None,
     full_depth: int = 18,
     maia_policy_cache: MaiaPolicyCache | None = None,
