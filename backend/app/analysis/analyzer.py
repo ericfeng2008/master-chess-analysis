@@ -34,7 +34,7 @@ def analyze_game(
     pgn_text: str,
     stockfish: StockfishClient,
     maia: Maia3Client,
-    acceptable_drop: float = 0.5,
+    acceptable_drop: float = 0.3,
     minefield_threshold: float = 0.80,
     blunder_threshold: float = 1.0,
     mbi_trap_threshold: float = 0.40,
@@ -163,9 +163,6 @@ def analyze_game(
             else:
                 white_mate = None
 
-            # Carry forward prev_eval for the next position (opponent's perspective)
-            prev_eval = -stm_eval
-
             # Refinement guarantees the bounds do not straddle the threshold.
             is_minefield = result.cti_lower_bound >= minefield_threshold
 
@@ -193,6 +190,11 @@ def analyze_game(
                     board, move, depth=stockfish.depth
                 )
                 eval_drop = result.best_eval - played_move_eval
+
+            # Carry the actual played continuation into the next position's
+            # depth triage. The score is currently from this side-to-move's
+            # perspective, so negate it for the opponent to move next.
+            prev_eval = -played_move_eval
 
             if eval_drop >= blunder_threshold:
                 maia_prob_for_played = result.maia_policy.get(move, 0.0)

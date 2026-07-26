@@ -79,7 +79,7 @@ export function AnalyzerPage() {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [perspective, setPerspective] = useState<"white" | "black">("white");
 
-  const [acceptableDrop, setAcceptableDrop] = useState(0.5);
+  const [acceptableDrop, setAcceptableDrop] = useState(0.3);
   const [minefieldThreshold, setMinefieldThreshold] = useState(0.8);
   const [engineDepth, setEngineDepth] = useState(18);
   const [showConfig, setShowConfig] = useState(true);
@@ -93,9 +93,9 @@ export function AnalyzerPage() {
   const [maia3BlackElo, setMaia3BlackElo] = useState(DEFAULT_MAIA3_ELO);
 
   const restoreStoredAnalysis = (game: StoredGame, selectedPly = 0) => {
-    setAcceptableDrop(storedNumber(game.request.acceptable_drop, 0.5));
-    setMinefieldThreshold(storedNumber(game.request.minefield_threshold, 0.8));
-    setEngineDepth(storedNumber(game.request.engine_depth, 18));
+    setAcceptableDrop(Math.min(0.4, Math.max(0.2, storedNumber(game.request.acceptable_drop, 0.3))));
+    setMinefieldThreshold(Math.min(0.95, Math.max(0.8, storedNumber(game.request.minefield_threshold, 0.8))));
+    setEngineDepth(Math.min(28, Math.max(16, storedNumber(game.request.engine_depth, 18))));
     setBlunderThreshold(storedNumber(game.request.blunder_threshold, 1));
     setMbiTrapThreshold(storedNumber(game.request.mbi_trap_threshold, 0.4));
     setMbiOutlierThreshold(storedNumber(game.request.mbi_outlier_threshold, 0.05));

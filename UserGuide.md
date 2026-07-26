@@ -33,7 +33,9 @@ CTI measures how hard it is for a human to find a good move. It works by asking:
 
 CTI applies to any position regardless of evaluation. A position can be +5.0 in White's favor and still have high CTI if the winning moves are hard to find.
 
-For performance, CTI evaluates Stockfish roots covering at least 99.5% of Maia3's move probability and reports the small unevaluated tail as an uncertainty interval. Approximate values use an `≈` marker; positions near the minefield threshold are refined until their classification is unambiguous.
+For new analyses, a move is considered objectively good when it is within the **CTI: Acceptable Drop** of the best move. This setting defaults to **0.3 pawns** and supports values from **0.2 to 0.4 pawns**.
+
+For performance, CTI evaluates Stockfish roots covering at least 99% of Maia3's move probability and reports the unevaluated tail as an uncertainty interval of at most one percentage point. Approximate values use an `≈` marker; positions near the minefield threshold are refined until their classification is unambiguous.
 
 **Chart display**: Green line (White's moves), orange line (Black's moves).
 
@@ -41,7 +43,7 @@ For performance, CTI evaluates Stockfish roots covering at least 99.5% of Maia3'
 
 **Type**: Binary flag (Yes/No)
 
-A position is flagged as a minefield when its CTI exceeds the minefield threshold (default 0.80). Minefields represent dangerous positions where a strong player is likely to go wrong.
+A position is flagged as a minefield when its CTI exceeds the **CTI: Minefield Threshold**. This setting defaults to **0.80** and supports values from **0.80 to 0.95**. Minefields represent dangerous positions where a strong player is likely to go wrong.
 
 **Chart display**: Colored circles on the CTI line:
 
@@ -92,19 +94,14 @@ When a forced checkmate exists, the position info shows `#N` (White mates in N) 
 
 ## Configure Analysis
 
-The **Analysis Configuration** panel displays 8 configurable sliders organized in two columns. Leave the defaults in place until you are comfortable with the metric definitions above.
+The **Analysis Configuration** panel displays 8 configurable sliders. Leave the defaults in place until you are comfortable with the metric definitions above.
 
 The game information area also provides separate **White Maia3** and **Black Maia3** Elo controls. Both default to `2600` for new and unanalyzed games; select the ratings that best represent each player before starting analysis. Reopening an analyzed game restores the ratings that were actually used for that saved run.
 
-**Left column:**
-
-- **Stockfish Engine Depth** (12-28, default 18): Higher depth = more accurate but slower analysis
-- **CTI: Acceptable Drop** (0.1-2.0, default 0.5): Maximum eval drop (in pawns) for a move to count as "good" in CTI computation
-- **CTI: Minefield Threshold** (0.50-1.00, default 0.80): CTI value above which a position is flagged as a minefield
+- **Stockfish Engine Depth** (16-28, default 18): Higher depth = more accurate but slower analysis
+- **CTI: Acceptable Drop** (0.2-0.4, default 0.3): Maximum eval drop (in pawns) for a move to count as "good" in CTI computation
+- **CTI: Minefield Threshold** (0.80-0.95, default 0.80): CTI value above which a position is flagged as a minefield
 - **MBI: Blunder Threshold** (0.5-3.0, default 1.0): Minimum eval drop (in pawns) to classify a move as a blunder
-
-**Right column:**
-
 - **MBI: Trap Probability** (10%-80%, default 40%): Maia probability above which a blunder is a "Cognitive Trap"
 - **MBI: Outlier Probability** (1%-20%, default 5%): Maia probability below which a blunder is a "Random Oversight"
 - **EIG: Gap Threshold** (0.5-5.0, default 2.0): Minimum eval difference (in pawns) to flag an Engine-Intuition Gap
@@ -114,9 +111,9 @@ The game information area also provides separate **White Maia3** and **Black Mai
 
 | Parameter | Default | Range | Description |
 |---|---|---|---|
-| Stockfish Engine Depth | 18 | 12-28 | Search depth for Stockfish analysis |
-| CTI: Acceptable Drop | 0.5 | 0.1-2.0 | Max eval drop (pawns) for a move to be "good" |
-| CTI: Minefield Threshold | 0.80 | 0.50-1.00 | CTI above this flags a minefield |
+| Stockfish Engine Depth | 18 | 16-28 | Search depth for Stockfish analysis |
+| CTI: Acceptable Drop | 0.3 | 0.2-0.4 | Max eval drop (pawns) for a move to be "good" |
+| CTI: Minefield Threshold | 0.80 | 0.80-0.95 | CTI above this flags a minefield |
 | MBI: Blunder Threshold | 1.0 | 0.5-3.0 | Min eval drop (pawns) to classify a move as a blunder |
 | MBI: Trap Probability | 40% | 10%-80% | Maia probability above which a blunder is a Cognitive Trap |
 | MBI: Outlier Probability | 5% | 1%-20% | Maia probability below which a blunder is a Random Oversight |

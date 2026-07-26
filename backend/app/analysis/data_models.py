@@ -24,8 +24,8 @@ PROBE_DEPTH = 8
 MIN_ANALYSIS_DEPTH = 10
 
 # CTI evaluates the smallest Maia-probability prefix that reaches this target.
-# Any unevaluated tail becomes an explicit uncertainty interval.
-CTI_POLICY_COVERAGE = 0.995
+# Any unevaluated tail becomes an explicit uncertainty interval of at most 1%.
+CTI_POLICY_COVERAGE = 0.99
 
 
 @dataclass
