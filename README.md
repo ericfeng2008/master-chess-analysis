@@ -5,7 +5,7 @@ Master Chess Game Analyzer is a local chess-analysis and training application. I
 It combines:
 
 - **Stockfish**, a strong open-source chess engine, for objective position evaluation. Stockfish searches for the best continuations, scores positions in pawn-equivalent evaluations, and identifies which candidate moves preserve or lose objective value.
-- **Maia3-79M**, a history-aware neural-network model for predicting human chess moves. Maia3 considers the current position, recent position history, and separate player/opponent Elo ratings to estimate the probability of every legal move. It lets the analyzer distinguish positions that are objectively difficult from moves that merely look unusual to the engine. Learn more in the [Maia3 GitHub repository](https://github.com/CSSLab/maia3) and the [Maia3 Hugging Face collection](https://huggingface.co/collections/MaiaChess/maia3).
+- **Maia3**, a history-aware neural-network model for predicting human chess moves. Maia3 considers the current position, recent position history, and separate player/opponent Elo ratings to estimate the probability of every legal move. It lets the analyzer distinguish positions that are objectively difficult from moves that merely look unusual to the engine. Learn more in the [Maia3 GitHub repository](https://github.com/CSSLab/maia3) and the [Maia3 Hugging Face collection](https://huggingface.co/collections/MaiaChess/maia3).
 
 Analysis runs locally on your machine: no account, cloud synchronization, or game data sent externally.
 
