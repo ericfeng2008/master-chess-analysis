@@ -15,7 +15,7 @@ Use **Upload PGN** beneath the board to begin. A game and its completed analyses
 - Use **Open Saved Game** beneath the board to reopen a stored game and resume analysis review.
 - Use **Mistake Library** in the page header to inspect, practice, or open the full game for a saved mistake.
 
-[SCREENSHOT: ANALYSIS ENTRY WORKFLOWS]
+<img src="./images/EntryWorkflows.png" alt="Analysis entry workflows" width="1200" />
 
 ## Understand the Analysis Metrics
 
@@ -151,7 +151,7 @@ After analysis completes:
 - **Chess Board**: Updates automatically to show the position for the selected move. After analysis, a thin vertical evaluation bar beside the main board visualizes that exact position's White-versus-Black balance. Hover over the bar to reveal only its compact White-perspective value: signed pawn scores such as `+1.25` or `-2.50`, signed mate values such as `#3` or `#-2`, and terminal results `1-0` or `0-1`. Explored and Stockfish-variation positions use a neutral striped bar with a `pending` tooltip while their ad-hoc evaluation runs, never a stale mainline value. The segment order flips with the board without changing the score's perspective. Click the flip button to change board orientation. After analysis, drag or click pieces to explore alternative moves.
 - **Position Info**: Shows detailed metrics for the selected move including eval, CTI, minefield status, MBI classification, EIG, and BRI.
 
-[SCREENSHOT: COMPLETED ANALYSIS RESULTS]
+<img src="./images/CompletedAnalysis.png" alt="Completed analysis results" width="1200" />
 
 ### 4. Explore Alternative Moves
 
@@ -180,7 +180,7 @@ Re-analysis shows only additional mistakes. Active and archived Mistake Library 
 
 Maia likelihood is a model-estimated probability that a player in the selected White/Black Elo context would choose the move. It is not an observed percentage of real players.
 
-[SCREENSHOT: SAVE MISTAKES PANEL]
+<img src="./images/SaveMistakePanel.png" alt="Save mistakes panel" width="1200" />
 
 ## Workflow: Continue Local Study
 
@@ -224,7 +224,7 @@ Practice shortcuts:
 | `2` | Understood |
 | `Escape` | Return to the Mistake Library |
 
-[SCREENSHOT: MISTAKE LIBRARY AND PRACTICE FLOW]
+<img src="./images/MistakeLibrary.png" alt="Mistake Library and practice flow" width="1200" />
 
 ## Local Data, Storage, and Privacy
 

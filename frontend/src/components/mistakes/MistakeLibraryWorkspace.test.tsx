@@ -10,6 +10,7 @@ let items:ReturnType<typeof savedMistake>[]=[savedMistake()]
 let selected=new Set<string>()
 vi.mock('../../hooks/useMistakeLibrary',()=>({useMistakeLibrary:()=>({query:{query:'',player_name:'',side:'',reason:'',tag:'',lifecycle:'active',practice_state:'',page:1,page_size:25},items,total:items.length,tags:[{id:'t1',name:'Calculation horizon',item_count:1},{id:'t2',name:'Opponent resource',item_count:0}],detail,selected,loading:false,saving:false,error:null,...mocks})}))
 vi.mock('../../api/mistakes',()=>({getStoredGame:vi.fn()}))
+vi.mock('../ChessBoard',()=>({ChessBoard:({orientation,interactive}:{orientation:'white'|'black';interactive?:boolean})=><div data-testid="mistake-chessboard" data-orientation={orientation} data-interactive={interactive||undefined}/>}))
 
 describe('MistakeLibraryWorkspace',()=>{
   beforeEach(()=>{vi.clearAllMocks();detail=null;items=[savedMistake()];selected=new Set()})
@@ -72,6 +73,35 @@ describe('MistakeLibraryWorkspace',()=>{
     view.rerender(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
     expect(screen.getByRole('tab',{name:'Study'})).toHaveAttribute('aria-selected','true')
     expect(screen.queryByText('Qd2')).not.toBeInTheDocument()
+  })
+
+  it('orients Black study and practice boards toward Black and prefixes Black SAN values',()=>{
+    const blackMistake=savedMistake({side:'black',decision_fen:'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2',played_move:'Nc6',best_move:'Nf6',evidence:{...savedMistake().evidence,best_line:['Nf6','Bb5','a6','Ba4','Nf6','O-O','Be7','Re1','b5']}})
+    detail=blackMistake
+    items=[blackMistake]
+    render(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    expect(screen.getByTestId('mistake-chessboard')).toHaveAttribute('data-orientation','black')
+    const solution=screen.getByLabelText('Mistake solution')
+    expect(within(solution).getByText('.. Nc6')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button',{name:'Reveal Best Move'}))
+    expect(within(solution).getByText('.. Nf6')).toBeInTheDocument()
+    expect(within(solution).getByText('.. Nf6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button',{name:'View complete line'}))
+    expect(screen.getByRole('dialog',{name:'Complete best line'})).toHaveTextContent('.. Nf6 Bb5 a6 Ba4 Nf6 O-O Be7 Re1 b5')
+    fireEvent.click(screen.getByRole('button',{name:'Back to study'}))
+    fireEvent.click(screen.getByRole('button',{name:'Practice'}))
+    expect(screen.getByTestId('mistake-chessboard')).toHaveAttribute('data-orientation','black')
+  })
+
+  it('keeps White study SAN unprefixed and the board White-oriented',()=>{
+    detail=savedMistake()
+    render(<MistakeLibraryWorkspace onBack={vi.fn()} onOpenGame={vi.fn()}/>)
+    expect(screen.getByTestId('mistake-chessboard')).toHaveAttribute('data-orientation','white')
+    expect(screen.getByLabelText('Mistake solution')).toHaveTextContent('Nxe5')
+    expect(screen.getByLabelText('Mistake solution')).not.toHaveTextContent('.. Nxe5')
+    const studyView=screen.getByLabelText('Mistake solution').closest('.mistake-study-view') as HTMLElement
+    expect(within(studyView).getByText('CTI').parentElement).toHaveTextContent('84%')
+    expect(screen.queryByText('CTI interval')).not.toBeInTheDocument()
   })
 
   it('paginates long practice history locally',()=>{
