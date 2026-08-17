@@ -33,7 +33,10 @@ export interface AnalysisHistoryEntry {
   engine: Record<string, unknown>;
   maia: Record<string, unknown>;
   metric_schema_version: number;
+  is_legacy?: boolean;
 }
+
+export type AnalysisScope = 'both' | 'white' | 'black';
 
 export interface PositionEvalResult {
   eval: number;
@@ -63,6 +66,12 @@ export interface AnalysisMoveResult {
   mbi_classification: string | null;
   mbi_maia_prob: number | null;
   played_move_eval_drop?: number | null;
+  matched_best_eval?: number | null;
+  matched_played_eval?: number | null;
+  comparison_depth?: number | null;
+  comparison_method?: string | null;
+  comparison_status?: 'complete' | 'unavailable' | 'not_applicable';
+  cti_skip_reason?: 'initial_position' | 'side_not_selected' | null;
   eig_value: number | null;
   is_eig_flagged: boolean;
   is_brilliant: boolean;
@@ -86,6 +95,7 @@ export interface AnalyzeResult {
 export interface AnalyzeRequest {
   pgn: string;
   game_id?: string | null;
+  analysis_scope?: AnalysisScope;
   acceptable_drop: number;
   minefield_threshold: number;
   engine_depth: number;

@@ -2,20 +2,15 @@
 
 This guide explains how to analyze a PGN, understand the results and configuration, save mistakes worth revisiting, and continue local study. Games, analyses, saved mistakes, tags, and practice attempts stay on your machine.
 
-## Choose Your Workflow
+## From Game Analysis to Deliberate Practice
 
-### New analysis
+Use this workflow to turn difficult decisions from your games into focused training material:
 
-**Upload PGN** → **Configure analysis** → **Run analysis** → **Review results** → **Save selected mistakes** → **Mistake Library** → **Practice**
+<img src="./images/ctiWorkflowDiagram.png" alt="Workflow: analyze a game, identify high-CTI mistakes, save them locally, add personal tags, filter by tag, and practice without first seeing the answer" width="1200" />
 
-Use **Upload PGN** beneath the board to begin. A game and its completed analyses are retained locally; saving suggested mistakes is a separate, explicit action after review.
+Begin by [analyzing a game](#analyze-a-new-game), then [save the mistakes worth revisiting](#5-save-mistakes-worth-revisiting). In the [Mistake Library](#use-the-local-mistake-library), review those decisions and add personal notes and tags. Filter by a tag to [practice related positions](#practice-saved-mistakes) with the answer hidden, then reveal the feedback and mark each attempt **Again** or **Understood**.
 
-### Continue local study
-
-- Use **Open Saved Game** beneath the board to reopen a stored game and resume analysis review.
-- Use **Mistake Library** in the page header to inspect, practice, or open the full game for a saved mistake.
-
-[SCREENSHOT: ANALYSIS ENTRY WORKFLOWS]
+The diagram highlights high-CTI mistakes; the application also suggests human-natural blunders. Saving mistakes is an explicit action after analysis. To resume later, [open a saved game](#open-a-saved-game) or return directly to the Mistake Library.
 
 ## Understand the Analysis Metrics
 
@@ -31,9 +26,15 @@ CTI measures how hard it is for a human to find a good move. It works by asking:
 - **CTI = 0.85**: 85% of the probability mass falls on moves that are not within the acceptable drop of the best move. Very difficult for humans.
 - **CTI = 1.0**: No move that humans are likely to play is objectively acceptable. Extremely hard.
 
-CTI applies to any position regardless of evaluation. A position can be +5.0 in White's favor and still have high CTI if the winning moves are hard to find.
+CTI applies to each decision made by a selected player, regardless of evaluation. A position can be +5.0 in White's favor and still have high CTI if the winning moves are hard to find.
 
-For performance, CTI evaluates Stockfish roots covering at least 99.5% of Maia3's move probability and reports the small unevaluated tail as an uncertainty interval. Approximate values use an `≈` marker; positions near the minefield threshold are refined until their classification is unambiguous.
+For new analyses, a move is considered objectively good when it is within the **CTI: Acceptable Drop** of the best move. This setting defaults to **0.3 pawns** and supports values from **0.2 to 0.4 pawns**.
+
+For performance, CTI evaluates Stockfish roots covering at least 99% of Maia3's move probability and reports the unevaluated tail as an uncertainty interval of at most one percentage point. Approximate values use an `≈` marker; positions near the minefield threshold are refined until their classification is unambiguous.
+
+The exact standard starting position is not treated as a meaningful decision and therefore has no CTI, good-move set, minefield, MBI, EIG, or BRI calculation. Its normal Stockfish evaluation remains present on the evaluation timeline. Custom starting positions are analyzed normally.
+
+When a single-side scope is selected, the other side likewise keeps its normal Stockfish timeline evaluation but has no CTI or dependent decision metrics: good moves, minefield status, MBI, EIG, BRI, or decision best line. Missing values mean **not analyzed**, not a zero score, a negative result, or evidence that the player made no mistakes.
 
 **Chart display**: Green line (White's moves), orange line (Black's moves).
 
@@ -41,7 +42,7 @@ For performance, CTI evaluates Stockfish roots covering at least 99.5% of Maia3'
 
 **Type**: Binary flag (Yes/No)
 
-A position is flagged as a minefield when its CTI exceeds the minefield threshold (default 0.80). Minefields represent dangerous positions where a strong player is likely to go wrong.
+A position is flagged as a minefield when its CTI exceeds the **CTI: Minefield Threshold**. This setting defaults to **0.80** and supports values from **0.80 to 0.95**. Minefields represent dangerous positions where a strong player is likely to go wrong.
 
 **Chart display**: Colored circles on the CTI line:
 
@@ -92,31 +93,28 @@ When a forced checkmate exists, the position info shows `#N` (White mates in N) 
 
 ## Configure Analysis
 
-The **Analysis Configuration** panel displays 8 configurable sliders organized in two columns. Leave the defaults in place until you are comfortable with the metric definitions above.
+The **Analysis settings** panel displays a CTI analysis-scope selector and 8 configurable sliders. Leave the defaults in place until you are comfortable with the metric definitions above.
 
 The game information area also provides separate **White Maia3** and **Black Maia3** Elo controls. Both default to `2600` for new and unanalyzed games; select the ratings that best represent each player before starting analysis. Reopening an analyzed game restores the ratings that were actually used for that saved run.
 
-**Left column:**
+Use the configuration reference below for each control’s default, range, and purpose.
 
-- **Stockfish Engine Depth** (12-28, default 18): Higher depth = more accurate but slower analysis
-- **CTI: Acceptable Drop** (0.1-2.0, default 0.5): Maximum eval drop (in pawns) for a move to count as "good" in CTI computation
-- **CTI: Minefield Threshold** (0.50-1.00, default 0.80): CTI value above which a position is flagged as a minefield
-- **MBI: Blunder Threshold** (0.5-3.0, default 1.0): Minimum eval drop (in pawns) to classify a move as a blunder
+### Choose the CTI Analysis Scope
 
-**Right column:**
+For most post-game study, start with **White** or **Black** for the side you played. Players are usually most interested in the decisions they made themselves, so analyzing only that side avoids spending CTI work on the opponent's decisions.
 
-- **MBI: Trap Probability** (10%-80%, default 40%): Maia probability above which a blunder is a "Cognitive Trap"
-- **MBI: Outlier Probability** (1%-20%, default 5%): Maia probability below which a blunder is a "Random Oversight"
-- **EIG: Gap Threshold** (0.5-5.0, default 2.0): Minimum eval difference (in pawns) to flag an Engine-Intuition Gap
-- **BRI: Brilliancy Threshold** (1%-20%, default 5%): Maximum Maia probability for a best move to qualify as "Brilliant"
+In a balanced game, a single-side run typically removes about half of the Maia and coherent Stockfish work used for CTI, good moves, minefields, MBI, EIG, and BRI. The total end-to-end saving can be smaller than 50% because the application still evaluates every position with single-PV Stockfish to keep the evaluation timeline complete.
+
+Choose **Both sides** when you want to compare both players' decision quality, review either side's mistakes, or prepare a complete game report.
 
 ### Configuration Reference
 
 | Parameter | Default | Range | Description |
 |---|---|---|---|
-| Stockfish Engine Depth | 18 | 12-28 | Search depth for Stockfish analysis |
-| CTI: Acceptable Drop | 0.5 | 0.1-2.0 | Max eval drop (pawns) for a move to be "good" |
-| CTI: Minefield Threshold | 0.80 | 0.50-1.00 | CTI above this flags a minefield |
+| CTI Analysis Scope | Both sides | Both sides, White, Black | Sides whose decisions receive CTI and dependent metrics |
+| Stockfish Engine Depth | 18 | 16-28 | Search depth for Stockfish analysis; higher values are more accurate but slower |
+| CTI: Acceptable Drop | 0.3 | 0.2-0.4 | Max eval drop (pawns) for a move to be "good" |
+| CTI: Minefield Threshold | 0.80 | 0.80-0.95 | CTI above this flags a minefield |
 | MBI: Blunder Threshold | 1.0 | 0.5-3.0 | Min eval drop (pawns) to classify a move as a blunder |
 | MBI: Trap Probability | 40% | 10%-80% | Maia probability above which a blunder is a Cognitive Trap |
 | MBI: Outlier Probability | 5% | 1%-20% | Maia probability below which a blunder is a Random Oversight |
@@ -125,7 +123,11 @@ The game information area also provides separate **White Maia3** and **Black Mai
 | White Maia3 Elo | 2600 | 2000, 2200, 2400, 2600 | White player's rating context for Maia3 |
 | Black Maia3 Elo | 2600 | 2000, 2200, 2400, 2600 | Black player's rating context for Maia3 |
 
-## Workflow: Analyze a New Game
+## Analyze a New Game
+
+Use **Upload PGN** or **Open Saved Game** beneath the board to begin or resume analysis. Open **Mistake Library** from the page header to review or practice saved decisions.
+
+<img src="./images/EntryWorkflows.png" alt="Analysis entry workflows" width="1200" />
 
 ### 1. Upload a PGN File
 
@@ -139,19 +141,21 @@ Games are recognized from chess content, not filenames or PGN decoration. Header
 
 Click **Analyze** to start. A progress bar shows positions analyzed and minefields found. Analysis can be canceled at any time.
 
-Completed analyses are saved as immutable versions of the game. Clicking **Analyze** with the same completed configuration restores that version without engine work. Changing depth, thresholds, Elo context, or another result-affecting setting creates a new version. The **Analysis history** control identifies versions by date and depth and can restore any of them instantly.
+Completed analyses are saved as immutable versions of the game. Clicking **Analyze** with the same completed configuration restores that version without engine work. Changing scope, depth, thresholds, Elo context, or another result-affecting setting creates a new version. The **Analysis history** control identifies versions by scope, date, and depth and can restore any of them instantly.
+
+A White-only run and a Black-only run are separate saved versions. You can first analyze one side and later choose the other side, but those results are not merged automatically. Choose **Both sides** and run analysis when one result must contain CTI for both players.
 
 ### 3. Navigate Results
 
 After analysis completes:
 
-- **Chart**: Click any point on the evaluation chart to jump to that move. Use the **White Player** / **Black Player** toggle above the chart to filter CTI lines and markers by perspective.
+- **Chart**: Click any point on the evaluation chart to jump to that move. Use the **White Player** / **Black Player** toggle above the chart to filter available CTI lines and markers by perspective. The toggle cannot generate CTI evidence for a side that was not included in the saved analysis.
 - **Move Navigator**: Use the arrow buttons below the board to step through moves.
 - **PGN Viewer**: Click any move in the PGN notation to navigate there. Stockfish best continuations for blunders appear inline in bold green parenthesized notation `(...)`. User-explored variations appear in teal bracket notation `[...]`.
 - **Chess Board**: Updates automatically to show the position for the selected move. After analysis, a thin vertical evaluation bar beside the main board visualizes that exact position's White-versus-Black balance. Hover over the bar to reveal only its compact White-perspective value: signed pawn scores such as `+1.25` or `-2.50`, signed mate values such as `#3` or `#-2`, and terminal results `1-0` or `0-1`. Explored and Stockfish-variation positions use a neutral striped bar with a `pending` tooltip while their ad-hoc evaluation runs, never a stale mainline value. The segment order flips with the board without changing the score's perspective. Click the flip button to change board orientation. After analysis, drag or click pieces to explore alternative moves.
-- **Position Info**: Shows detailed metrics for the selected move including eval, CTI, minefield status, MBI classification, EIG, and BRI.
+- **Position Info**: Shows the timeline evaluation for every selected move. It shows CTI, minefield status, MBI classification, EIG, and BRI when that decision was analyzed, or explains that the standard initial position or the unselected side was intentionally skipped.
 
-[SCREENSHOT: COMPLETED ANALYSIS RESULTS]
+<img src="./images/CompletedAnalysis.png" alt="Completed analysis results" width="1200" />
 
 ### 4. Explore Alternative Moves
 
@@ -174,15 +178,15 @@ After analysis completes, the **Mistakes to revisit** panel reads the persisted 
 
 A high-CTI position is not saved when the player found an acceptable move. One position matching both reasons appears once with both system labels. Approximate CTI uses its lower bound, so an uncertainty interval that crosses the threshold is not promoted as a definite minefield.
 
-Choose **White** or **Black** under **Mistake made by**. Either side can represent you or your opponent; no player profile is required. Review the compact suggestions and select **Save selected mistakes**. Saving is explicit and duplicate-safe. The completed game analysis and full normalized PGN are already stored locally even when no suggestion is saved.
+Choose **White** or **Black** under **Mistake made by**. Either side can represent you or your opponent; no player profile is required. A single-side run can suggest mistakes only for its analyzed side; the other side is labeled **not analyzed**, not reported as having zero mistakes. Run that side or choose **Both sides** to review its evidence. Review the compact suggestions and select **Save selected mistakes**. Saving is explicit and duplicate-safe. The completed game analysis and full normalized PGN are already stored locally even when no suggestion is saved.
 
 Re-analysis shows only additional mistakes. Active and archived Mistake Library items both suppress the same saved decision from later capture suggestions. Existing notes, tags, evidence, lifecycle, and practice attempts are never overwritten by re-analysis; deleting an item allows that decision to be suggested again.
 
 Maia likelihood is a model-estimated probability that a player in the selected White/Black Elo context would choose the move. It is not an observed percentage of real players.
 
-[SCREENSHOT: SAVE MISTAKES PANEL]
+<img src="./images/SaveMistakePanel.png" alt="Save mistakes panel" width="600" />
 
-## Workflow: Continue Local Study
+## Review, Tag, and Practice Saved Mistakes
 
 ### Open a Saved Game
 
@@ -224,11 +228,11 @@ Practice shortcuts:
 | `2` | Understood |
 | `Escape` | Return to the Mistake Library |
 
-[SCREENSHOT: MISTAKE LIBRARY AND PRACTICE FLOW]
+<img src="./images/MistakeLibrary.png" alt="Mistake Library and practice flow" width="1200" />
 
 ## Local Data, Storage, and Privacy
 
-Games, analyses, saved mistakes, tags, and practice attempts use `backend/data/master-chess-analysis.db` by default. Existing databases are upgraded automatically while preserving existing study data. Long-running analysis continues in the background; progress can resume when the same game and settings are reopened after a browser or backend reconnect.
+Games, analyses, saved mistakes, tags, and practice attempts use `backend/data/master-chess-analysis.db` by default. Existing databases are upgraded automatically while preserving existing study data. Long-running analysis continues in the background; progress can resume when the same game and exact settings, including CTI analysis scope, are reopened after a browser or backend reconnect.
 
 If persistence is unavailable, the first game in a valid PGN can still be viewed and analyzed in memory. Trailing games are not retained. The UI keeps a non-expiring warning visible and does not claim that the import or result was saved; cache history remains unavailable until local persistence recovers.
 

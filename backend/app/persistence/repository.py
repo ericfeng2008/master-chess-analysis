@@ -14,6 +14,7 @@ from .metadata import (
 )
 from .provenance import (
     GAME_FINGERPRINT_VERSION,
+    METRIC_SCHEMA_VERSION,
     ParsedPgn,
     analysis_fingerprint,
     game_fingerprint,
@@ -191,18 +192,19 @@ class AnalysisRepository:
     def preferred_analysis_run(self, game_id: str) -> dict[str, Any] | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                """SELECT * FROM analysis_runs WHERE game_id=?
+                """SELECT * FROM analysis_runs WHERE game_id=? AND metric_schema_version=?
                    ORDER BY created_at DESC,id DESC LIMIT 1""",
-                (game_id,),
+                (game_id, METRIC_SCHEMA_VERSION),
             ).fetchone()
         return self._analysis_run(row) if row else None
 
     def game_import_result(self, game: dict[str, Any]) -> dict[str, Any]:
         history = self.analysis_history(str(game["id"]))
+        preferred = self.preferred_analysis_run(str(game["id"]))
         return {
             **game,
             "analysis_history": history,
-            "preferred_analysis_run_id": history[0]["id"] if history else None,
+            "preferred_analysis_run_id": preferred["id"] if preferred else None,
         }
 
     def logical_game_detail(self, game_id: str, analysis_run_id: str | None = None) -> dict[str, Any] | None:
@@ -213,10 +215,11 @@ class AnalysisRepository:
         if run is not None and run.get("game_id") != game_id:
             return None
         history = self.analysis_history(game_id)
+        preferred = self.preferred_analysis_run(game_id)
         return {
             **game,
             "analysis_history": history,
-            "preferred_analysis_run_id": history[0]["id"] if history else None,
+            "preferred_analysis_run_id": preferred["id"] if preferred else None,
             "analysis": run,
         }
 
@@ -276,8 +279,9 @@ class AnalysisRepository:
             row = connection.execute(
                 """SELECT * FROM analysis_runs
                    WHERE game_id=? AND analysis_fingerprint=? AND cacheable=1
+                     AND metric_schema_version=?
                    ORDER BY created_at DESC,id DESC LIMIT 1""",
-                (game_id, compatibility_digest),
+                (game_id, compatibility_digest, METRIC_SCHEMA_VERSION),
             ).fetchone()
         return self._analysis_run(row) if row else None
 
@@ -289,9 +293,9 @@ class AnalysisRepository:
         with self.database.connect() as connection:
             row = connection.execute(
                 """SELECT * FROM analysis_checkpoints
-                   WHERE game_id=? AND analysis_fingerprint=?
+                   WHERE game_id=? AND analysis_fingerprint=? AND metric_schema_version=?
                    ORDER BY updated_at DESC,id DESC LIMIT 1""",
-                (game_id, compatibility_digest),
+                (game_id, compatibility_digest, METRIC_SCHEMA_VERSION),
             ).fetchone()
         if row is None:
             return None
@@ -516,6 +520,7 @@ class AnalysisRepository:
             "engine": json_loads(row["engine_json"], {}),
             "maia": json_loads(row["maia_json"], {}),
             "metric_schema_version": row["metric_schema_version"],
+            "is_legacy": row["metric_schema_version"] != METRIC_SCHEMA_VERSION,
         }
 
     @staticmethod
@@ -533,6 +538,7 @@ class AnalysisRepository:
             "engine": json_loads(row["engine_json"], {}),
             "maia": json_loads(row["maia_json"], {}),
             "metric_schema_version": row["metric_schema_version"],
+            "is_legacy": row["metric_schema_version"] != METRIC_SCHEMA_VERSION,
             "result": json_loads(row["result_json"], {}),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

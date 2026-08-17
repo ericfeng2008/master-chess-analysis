@@ -16,7 +16,7 @@ from app.pgn_utils import normalize_pgn_for_python_chess
 from .models import AnalysisRunSnapshot
 
 
-METRIC_SCHEMA_VERSION = 3
+METRIC_SCHEMA_VERSION = 5
 GAME_FINGERPRINT_VERSION = 1
 ANALYSIS_FINGERPRINT_VERSION = 1
 MISTAKE_FINGERPRINT_VERSION = 1
@@ -171,11 +171,13 @@ def pgn_fingerprint(normalized_pgn: str) -> str:
 
 
 def _stable_analysis_request(request: dict[str, Any]) -> dict[str, Any]:
-    return {
+    stable = {
         key: value
         for key, value in request.items()
         if key not in {"pgn", "game_id", "force_reanalysis"}
     }
+    stable.setdefault("analysis_scope", "both")
+    return stable
 
 
 def _stable_engine_identity(engine: dict[str, Any]) -> dict[str, Any]:

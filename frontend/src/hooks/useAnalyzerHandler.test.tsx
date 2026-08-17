@@ -35,7 +35,7 @@ function deps(overrides: Partial<AnalyzerHandlersDeps> = {}): AnalyzerHandlersDe
     enterSavedExploration: vi.fn(), goTo: vi.fn(), hasResult: false, activeIndex: null, parsedMoves: [],
     pgn: '[Event "Test"]\n\n1. e4 *', gameId: 'game-1', acceptableDrop: .5, minefieldThreshold: .8,
     engineDepth: 14, blunderThreshold: 1, mbiTrapThreshold: .4, mbiOutlierThreshold: .05,
-    eigThreshold: 2, briThreshold: .05, maia3WhiteElo: 2200, maia3BlackElo: 2200,
+    eigThreshold: 2, briThreshold: .05, maia3WhiteElo: 2200, maia3BlackElo: 2200, analysisScope: 'both',
     setPgn: vi.fn(), setGameId: vi.fn(), setAnalysisHistory: vi.fn(), setImportPersistenceWarning: vi.fn(),
     clearAnalysis: vi.fn(), restoreImportedAnalysis: vi.fn(), setUploadSummary: vi.fn(), setImportNotice: vi.fn(), setUploadError: vi.fn(),
     setUploading: vi.fn(), setUploadedFileName: vi.fn(), setShowConfig: vi.fn(), variationState: null,
@@ -97,11 +97,11 @@ describe('useAnalyzerHandler local analysis restoration', () => {
   })
 
   it('sends the logical game and current changed settings to analysis', () => {
-    const values = deps({ engineDepth: 18 })
+    const values = deps({ engineDepth: 18, analysisScope: 'black' })
     const { result } = renderHook(() => useAnalyzerHandler(values))
     act(() => result.current.handleAnalyze())
     expect(values.startAnalysis).toHaveBeenCalledWith(
-      values.pgn, 'game-1', .5, .8, 18, 1, .4, .05, 2, .05, 2200, 2200,
+      values.pgn, 'game-1', .5, .8, 18, 1, .4, .05, 2, .05, 2200, 2200, 'black',
     )
   })
 })

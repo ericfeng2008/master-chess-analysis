@@ -7,6 +7,7 @@ import { AnalysisChart } from "./AnalysisChart";
 import { buildAnalysisChartData, type AnalysisMoveLike } from "./analysisChartData";
 
 const chartHarness = vi.hoisted(() => ({
+  areas: [] as Array<Record<string, unknown>>,
   lines: [] as Array<Record<string, unknown>>,
 }));
 
@@ -14,7 +15,10 @@ vi.mock("recharts", () => {
   const Container = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   const Empty = () => null;
   return {
-    Area: Empty,
+    Area: (props: Record<string, unknown>) => {
+      chartHarness.areas.push(props);
+      return null;
+    },
     ComposedChart: Container,
     Line: (props: Record<string, unknown>) => {
       chartHarness.lines.push(props);
@@ -32,7 +36,34 @@ vi.mock("recharts", () => {
 
 describe("AnalysisChart Stockfish series", () => {
   beforeEach(() => {
+    chartHarness.areas.length = 0;
     chartHarness.lines.length = 0;
+  });
+
+  it("uses opaque semantic advantage fills and a separate evaluation-line color", () => {
+    render(
+      <AnalysisChart
+        moves={[move(0.8), move(-1.25)]}
+        minefields={[]}
+        selectedIndex={0}
+        onSelectMove={vi.fn()}
+        perspective="white"
+      />,
+    );
+
+    expect(chartHarness.areas.find((area) => area.dataKey === "evalPositive")).toMatchObject({
+      fill: "var(--chart-eval-positive)",
+      fillOpacity: 1,
+      baseValue: 0,
+    });
+    expect(chartHarness.areas.find((area) => area.dataKey === "evalNegative")).toMatchObject({
+      fill: "var(--chart-eval-negative)",
+      fillOpacity: 1,
+      baseValue: 0,
+    });
+    expect(chartHarness.lines.find((line) => line.dataKey === "stockfish_eval")).toMatchObject({
+      stroke: "var(--chart-eval-line)",
+    });
   });
 
   it("draws an explicit straight marker-free evaluation line for loaded analysis data", () => {
@@ -49,7 +80,7 @@ describe("AnalysisChart Stockfish series", () => {
     const stockfishLine = chartHarness.lines.find((line) => line.dataKey === "stockfish_eval");
     expect(stockfishLine).toMatchObject({
       type: "linear",
-      stroke: "var(--chart-eval-negative)",
+      stroke: "var(--chart-eval-line)",
       strokeWidth: 1,
       dot: false,
       activeDot: false,
@@ -74,6 +105,19 @@ describe("AnalysisChart Stockfish series", () => {
     ] as unknown as AnalysisMoveLike[];
     expect(buildAnalysisChartData(invalidRestored).map((point) => point.stockfish_eval)).toEqual([null, null]);
     expect(buildAnalysisChartData(invalidRestored).map((point) => point.evalPositive)).toEqual([null, null]);
+  });
+
+  it("keeps timeline points when CTI is intentionally skipped", () => {
+    const skipped = [
+      { ...move(0.25), cti: null, cti_skip_reason: "initial_position" as const },
+      { ...move(-0.4), side: "black", cti: null, cti_skip_reason: "side_not_selected" as const },
+    ];
+
+    expect(buildAnalysisChartData(skipped).map((point) => point.raw_eval)).toEqual([0.25, -0.4]);
+    expect(buildAnalysisChartData(skipped).map((point) => [point.ctiWhite, point.ctiBlack])).toEqual([
+      [null, null],
+      [null, null],
+    ]);
   });
 });
 

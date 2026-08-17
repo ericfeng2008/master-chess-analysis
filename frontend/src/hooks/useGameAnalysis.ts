@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 
 import { ssePost } from '../api/client';
 import { HISTORICAL_MAIA3_ELO } from '../constants/maia3';
-import type { AnalyzeResult, AnalysisMoveResult, AnalysisSSEEvent } from '../types';
+import type { AnalysisScope, AnalyzeResult, AnalysisMoveResult, AnalysisSSEEvent } from '../types';
 import type { StoredGame } from '../types/mistakes';
 
 interface GameAnalysisState {
@@ -15,6 +15,7 @@ interface GameAnalysisState {
   error: string | null;
   analysisMaia3WhiteElo: number | null;
   analysisMaia3BlackElo: number | null;
+  analysisScopeUsed: AnalysisScope | null;
 }
 
 export function useGameAnalysis() {
@@ -28,6 +29,7 @@ export function useGameAnalysis() {
     error: null,
     analysisMaia3WhiteElo: null,
     analysisMaia3BlackElo: null,
+    analysisScopeUsed: null,
   });
 
   const controllerRef = useRef<AbortController | null>(null);
@@ -46,6 +48,7 @@ export function useGameAnalysis() {
       briThreshold: number,
       maia3WhiteElo: number,
       maia3BlackElo: number,
+      analysisScope: AnalysisScope = 'both',
     ) => {
       controllerRef.current?.abort();
 
@@ -59,6 +62,7 @@ export function useGameAnalysis() {
         error: null,
         analysisMaia3WhiteElo: maia3WhiteElo,
         analysisMaia3BlackElo: maia3BlackElo,
+        analysisScopeUsed: analysisScope,
       });
 
       const controller = ssePost(
@@ -66,6 +70,7 @@ export function useGameAnalysis() {
         {
           pgn,
           game_id: gameId,
+          analysis_scope: analysisScope,
           acceptable_drop: acceptableDrop,
           minefield_threshold: minefieldThreshold,
           engine_depth: engineDepth,
@@ -143,7 +148,10 @@ export function useGameAnalysis() {
     const moves = game.result.moves ?? [];
     const whiteElo = game.request.maia3_white_elo ?? HISTORICAL_MAIA3_ELO;
     const blackElo = game.request.maia3_black_elo ?? HISTORICAL_MAIA3_ELO;
-    setState({
+    const storedScope = game.request.analysis_scope === 'white' || game.request.analysis_scope === 'black'
+      ? game.request.analysis_scope
+      : 'both';
+    setState((current) => ({
       isAnalyzing: false,
       movesAnalyzed: moves.length,
       totalMoves: moves.length,
@@ -154,12 +162,17 @@ export function useGameAnalysis() {
         persistence_warning: null,
         game_id: game.game_id,
         cache_hit: true,
+        analysis_history: game.result.analysis_history
+          ?? (game.game_id && current.result?.game_id === game.game_id
+            ? current.result.analysis_history
+            : undefined),
       },
       selectedMoveIndex: moves.length ? Math.max(0, Math.min(selectedPly, moves.length - 1)) : null,
       error: null,
       analysisMaia3WhiteElo: whiteElo,
       analysisMaia3BlackElo: blackElo,
-    });
+      analysisScopeUsed: storedScope,
+    }));
   }, []);
 
   const clearAnalysis = useCallback(() => {
@@ -174,6 +187,7 @@ export function useGameAnalysis() {
       error: null,
       analysisMaia3WhiteElo: null,
       analysisMaia3BlackElo: null,
+      analysisScopeUsed: null,
     });
   }, []);
 

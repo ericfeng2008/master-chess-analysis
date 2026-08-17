@@ -41,7 +41,11 @@ class ConcentratedMaia:
     model_name = "benchmark-policy"
     use_history = True
 
+    def __init__(self):
+        self.calls = 0
+
     def predict(self, board, **_kwargs):
+        self.calls += 1
         moves = list(board.legal_moves)
         if not moves:
             return {}
@@ -72,69 +76,104 @@ class CountingEngine:
 
 def instrument_methods(client):
     counts: Counter[str] = Counter()
-    for name in (
-        "quick_evaluate",
-        "quick_evaluate_with_mate",
-        "evaluate_best_move",
-        "evaluate_root_moves",
-        "evaluate_move",
-        "evaluate_position",
-    ):
-        original = getattr(client, name)
+    snapshots_by_fen: Counter[str] = Counter()
+    original_quick = client.quick_evaluate
+    original_best = client.evaluate_best_move
+    original_snapshot = client.evaluate_root_snapshot
 
-        def wrapper(*args, _name=name, _original=original, **kwargs):
-            counts[_name] += 1
-            return _original(*args, **kwargs)
+    def counted_quick(*args, **kwargs):
+        counts["depth_probes"] += 1
+        return original_quick(*args, **kwargs)
 
-        setattr(client, name, wrapper)
-    return counts
+    def counted_best(*args, **kwargs):
+        counts["timeline_single_pv"] += 1
+        return original_best(*args, **kwargs)
+
+    def counted_snapshot(board, *args, **kwargs):
+        fen = board.fen()
+        category = "coherent_snapshots" if snapshots_by_fen[fen] == 0 else "refinements"
+        snapshots_by_fen[fen] += 1
+        counts[category] += 1
+        result = original_snapshot(board, *args, **kwargs)
+        counts["snapshot_retries"] += max(0, int(getattr(result, "attempts", 1)) - 1)
+        return result
+
+    client.quick_evaluate = counted_quick
+    client.evaluate_best_move = counted_best
+    client.evaluate_root_snapshot = counted_snapshot
+    return counts, snapshots_by_fen
 
 
 def main() -> None:
     kwargs = {"depth": 10, "threads": 2, "hash_mb": 256}
     if "search_cache_entries" in inspect.signature(StockfishClient).parameters:
         kwargs["search_cache_entries"] = 2048
-    client = StockfishClient("/opt/homebrew/bin/stockfish", **kwargs)
-    engine = CountingEngine(client.engine)
-    client.engine = engine
-    method_counts = instrument_methods(client)
-
     runs = []
-    try:
-        for label in ("cold", "warm"):
-            searches_before = engine.searches
-            nodes_before = engine.nodes
-            engine_ms_before = engine.elapsed_ms
-            methods_before = method_counts.copy()
-            started = perf_counter()
-            diagnostics = AnalysisDiagnostics("benchmark") if AnalysisDiagnostics else None
-            if diagnostics is not None and activate_diagnostics is not None:
-                with activate_diagnostics(diagnostics):
-                    complete = list(analyze_game(PGN, client, ConcentratedMaia()))[-1]
-                stage_totals = diagnostics.summary("complete")["stages"]
-            else:
-                complete = list(analyze_game(PGN, client, ConcentratedMaia()))[-1]
-                stage_totals = None
-            runs.append(
-                {
-                    "label": label,
-                    "plies": len(complete.moves),
-                    "wall_elapsed_ms": round((perf_counter() - started) * 1000, 1),
-                    "stockfish_searches": engine.searches - searches_before,
-                    "stockfish_nodes": engine.nodes - nodes_before,
-                    "stockfish_elapsed_ms": round(engine.elapsed_ms - engine_ms_before, 1),
-                    "method_calls": {
-                        key: method_counts[key] - methods_before[key]
-                        for key in sorted(method_counts)
-                    },
-                    "serialized_best_line_detail_entries": sum(
-                        len(move.best_line_evals) for move in complete.moves
-                    ),
-                    "stage_totals": stage_totals,
+    for analysis_scope in ("both", "white", "black"):
+        client = StockfishClient("/opt/homebrew/bin/stockfish", **kwargs)
+        engine = CountingEngine(client.engine)
+        client.engine = engine
+        method_counts, snapshots_by_fen = instrument_methods(client)
+        try:
+            for cache_state in ("cold", "warm"):
+                snapshots_by_fen.clear()
+                searches_before = engine.searches
+                nodes_before = engine.nodes
+                engine_ms_before = engine.elapsed_ms
+                methods_before = method_counts.copy()
+                maia = ConcentratedMaia()
+                started = perf_counter()
+                diagnostics = AnalysisDiagnostics("benchmark") if AnalysisDiagnostics else None
+                if diagnostics is not None and activate_diagnostics is not None:
+                    with activate_diagnostics(diagnostics):
+                        complete = list(
+                            analyze_game(
+                                PGN,
+                                client,
+                                maia,
+                                analysis_scope=analysis_scope,
+                            )
+                        )[-1]
+                    stage_totals = diagnostics.summary("complete")["stages"]
+                else:
+                    complete = list(
+                        analyze_game(
+                            PGN,
+                            client,
+                            maia,
+                            analysis_scope=analysis_scope,
+                        )
+                    )[-1]
+                    stage_totals = None
+                call_categories = {
+                    key: method_counts[key] - methods_before[key]
+                    for key in (
+                        "timeline_single_pv",
+                        "depth_probes",
+                        "coherent_snapshots",
+                        "refinements",
+                        "snapshot_retries",
+                    )
                 }
-            )
-    finally:
-        client.close()
+                call_categories["maia_inferences"] = maia.calls
+                runs.append(
+                    {
+                        "analysis_scope": analysis_scope,
+                        "cache_state": cache_state,
+                        "plies": len(complete.moves),
+                        "wall_elapsed_ms": round((perf_counter() - started) * 1000, 1),
+                        "stockfish_searches": engine.searches - searches_before,
+                        "stockfish_nodes": engine.nodes - nodes_before,
+                        "stockfish_elapsed_ms": round(engine.elapsed_ms - engine_ms_before, 1),
+                        "call_categories": call_categories,
+                        "serialized_best_line_detail_entries": sum(
+                            len(move.best_line_evals) for move in complete.moves
+                        ),
+                        "stage_totals": stage_totals,
+                    }
+                )
+        finally:
+            client.close()
 
     print(json.dumps({"depth": 10, "threads": 2, "hash_mb": 256, "runs": runs}))
 

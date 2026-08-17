@@ -25,8 +25,12 @@ from app.analysis.data_models import (
     AnalysisProgressEvent,
 )
 from app.analysis.diagnostics import diagnostic_stage
-from app.analysis.metrics import MaiaPolicyCache, compute_cti, populate_eval_after
-from app.analysis.evaluation import terminal_eval_white
+from app.analysis.metrics import (
+    MaiaPolicyCache,
+    compute_cti,
+    evaluate_timeline_position,
+    populate_eval_after,
+)
 from app.pgn_utils import normalize_pgn_for_python_chess
 
 
@@ -34,7 +38,7 @@ def analyze_game(
     pgn_text: str,
     stockfish: StockfishClient,
     maia: Maia3Client,
-    acceptable_drop: float = 0.5,
+    acceptable_drop: float = 0.3,
     minefield_threshold: float = 0.80,
     blunder_threshold: float = 1.0,
     mbi_trap_threshold: float = 0.40,
@@ -43,6 +47,7 @@ def analyze_game(
     bri_threshold: float = 0.05,
     maia3_white_elo: int = DEFAULT_MAIA3_ELO,
     maia3_black_elo: int = DEFAULT_MAIA3_ELO,
+    analysis_scope: str = "both",
     initial_moves: list[AnalysisMoveData] | None = None,
     initial_minefields: list[int] | None = None,
     start_index: int = 0,
@@ -83,6 +88,9 @@ def analyze_game(
     """
     import io
 
+    if analysis_scope not in {"both", "white", "black"}:
+        raise ValueError("analysis_scope must be both, white, or black")
+
     pgn_io = io.StringIO(normalize_pgn_for_python_chess(pgn_text))
     game = chess.pgn.read_game(pgn_io)
     if game is None:
@@ -121,9 +129,27 @@ def analyze_game(
     # redundant Phase-1 probes. It is stored from the NEXT side-to-move's
     # perspective (negated after each position).
     prev_eval: float | None = None
+    if move_results:
+        previous = move_results[-1]
+        if (
+            previous.comparison_status == "complete"
+            and previous.matched_played_eval is not None
+        ):
+            prev_eval = -previous.matched_played_eval
 
     # Mate-in-N values (side-to-move perspective) for the post-processing pass
-    mate_stm_per_pos: list[int | None] = [None] * start_index
+    mate_stm_per_pos: list[int | None] = []
+    for position_index in range(start_index):
+        if position_index == 0:
+            mate_stm_per_pos.append(None)
+            continue
+        white_mate = move_results[position_index - 1].mate_in
+        position_side = positions[position_index][3]
+        mate_stm_per_pos.append(
+            white_mate
+            if white_mate is None or position_side == "white"
+            else -white_mate
+        )
 
     # Reuse Maia policy calls across positions within this analysis.
     maia_policy_cache: MaiaPolicyCache = {}
@@ -132,49 +158,68 @@ def analyze_game(
         board, move, move_number, side, position_history_fens = positions[idx]
         is_white = side == "white"
 
-        # Core CTI computation (also provides engine-evals and Maia policy
-        # needed for all other metrics)
-        result = compute_cti(
+        timeline = evaluate_timeline_position(
             board,
             stockfish,
-            maia,
-            acceptable_drop=acceptable_drop,
             prev_eval=prev_eval,
             full_depth=stockfish.depth,
-            maia_policy_cache=maia_policy_cache,
-            maia3_white_elo=maia3_white_elo,
-            maia3_black_elo=maia3_black_elo,
-            history_fens=position_history_fens,
-            played_move=move,
-            minefield_threshold=minefield_threshold,
         )
+        if timeline is None:
+            raise RuntimeError("Stockfish did not return a timeline result for a legal position")
 
-        if result is not None:
-            # ----- Eval perspective normalization -----
-            # result.best_eval is from side-to-move perspective.
-            # We normalize to White's perspective for storage:
-            # if Black to move, negate the eval.
-            stm_eval = result.best_eval
-            stm_mate = result.best_mate
-            white_eval = stm_eval if is_white else -stm_eval
+        timeline_stm_eval = timeline.evaluation
+        white_eval = timeline_stm_eval if is_white else -timeline_stm_eval
+        if timeline.mate is not None:
+            white_mate = timeline.mate if is_white else -timeline.mate
+        else:
+            white_mate = None
 
-            if stm_mate is not None:
-                white_mate = stm_mate if is_white else -stm_mate
-            else:
-                white_mate = None
+        cti_skip_reason: str | None = None
+        if idx == 0 and board.fen() == chess.STARTING_FEN:
+            cti_skip_reason = "initial_position"
+        elif analysis_scope != "both" and analysis_scope != side:
+            cti_skip_reason = "side_not_selected"
 
-            # Carry forward prev_eval for the next position (opponent's perspective)
-            prev_eval = -stm_eval
+        # Core CTI computation (also provides engine-evals and Maia policy
+        # needed for all other metrics)
+        result = None
+        if cti_skip_reason is None:
+            result = compute_cti(
+                board,
+                stockfish,
+                maia,
+                acceptable_drop=acceptable_drop,
+                prev_eval=prev_eval,
+                full_depth=stockfish.depth,
+                maia_policy_cache=maia_policy_cache,
+                maia3_white_elo=maia3_white_elo,
+                maia3_black_elo=maia3_black_elo,
+                history_fens=position_history_fens,
+                played_move=move,
+                minefield_threshold=minefield_threshold,
+                timeline=timeline,
+            )
 
+        comparison_status = result.comparison_status if result is not None else "not_applicable"
+        if result is not None and result.comparison_status == "complete":
+            assert result.best_eval is not None
+            assert result.best_move is not None
+            assert result.cti_lower_bound is not None
+            assert result.cti_upper_bound is not None
             # Refinement guarantees the bounds do not straddle the threshold.
             is_minefield = result.cti_lower_bound >= minefield_threshold
 
-            best_move_obj = result.best_pv[0]
+            best_move_obj = result.best_move
             # SAN map for good moves together with their eval drop from best (for UI display)
-            good_moves_eval = {
-                board.san(m): round(result.all_evals[m] - result.best_eval, 2)
-                for m in result.good_moves
-            }
+            good_moves_eval: dict[str, float] = {}
+            for good_move in result.good_moves:
+                raw_delta = result.all_evals[good_move] - result.best_eval
+                if not (-acceptable_drop < raw_delta <= 0.0):
+                    raise RuntimeError("Coherent good-move delta invariant violated")
+                displayed_delta = round(raw_delta, 2)
+                good_moves_eval[board.san(good_move)] = (
+                    0.0 if displayed_delta == 0 else displayed_delta
+                )
 
             # ----- MBI: Master Blunder Index -----
             # Classifies blunders by how "human-natural" they are using
@@ -182,17 +227,15 @@ def analyze_game(
             mbi_classification = None
             mbi_maia_prob = None
 
-            played_move_eval = result.all_evals.get(move)
-            if played_move_eval is not None:
-                eval_drop = result.best_eval - played_move_eval
-            else:
-                # Played move not in the sampled eval map. Evaluate it
-                # explicitly so MBI is based on the actual played move rather
-                # than a pessimistic proxy.
-                played_move_eval, _played_pv, _played_mate = stockfish.evaluate_move(
-                    board, move, depth=stockfish.depth
-                )
-                eval_drop = result.best_eval - played_move_eval
+            played_move_eval = result.played_move_eval
+            if played_move_eval is None:
+                raise RuntimeError("Complete root snapshot omitted the played move")
+            eval_drop = result.best_eval - played_move_eval
+
+            # Carry the actual played continuation into the next position's
+            # depth triage. The score is currently from this side-to-move's
+            # perspective, so negate it for the opponent to move next.
+            prev_eval = -played_move_eval
 
             if eval_drop >= blunder_threshold:
                 maia_prob_for_played = result.maia_policy.get(move, 0.0)
@@ -214,19 +257,8 @@ def analyze_game(
             if result.maia_policy:
                 maia_top_move = max(result.maia_policy, key=result.maia_policy.get)
                 maia_top_eval = result.all_evals.get(maia_top_move)
-
                 if maia_top_eval is None:
-                    # Maia's top move wasn't in the multi-PV set -- evaluate it separately.
-                    temp_board = board.copy()
-                    temp_board.push(maia_top_move)
-                    terminal_eval = terminal_eval_white(temp_board)
-                    if terminal_eval is not None:
-                        maia_top_eval = terminal_eval if is_white else -terminal_eval
-                    else:
-                        # Negate because quick_evaluate returns from stm
-                        # perspective of the resulting position, but we need
-                        # perspective of the current position.
-                        maia_top_eval = -stockfish.quick_evaluate(temp_board)
+                    raise RuntimeError("Complete root snapshot omitted Maia's top move")
 
                 eig_value = round(abs(result.best_eval - maia_top_eval), 2)
                 if eig_value >= eig_threshold:
@@ -281,30 +313,20 @@ def analyze_game(
                     best_line=best_line,
                     best_line_evals={},
                     mate_in=None,  # populated in post-processing pass
-                    played_move_eval_drop=round(max(0.0, eval_drop), 4),
+                    played_move_eval_drop=max(0.0, eval_drop),
+                    matched_best_eval=result.best_eval,
+                    matched_played_eval=played_move_eval,
+                    comparison_depth=result.comparison_depth,
+                    comparison_method=result.comparison_method,
+                    comparison_status="complete",
+                    cti_skip_reason=None,
                 )
-            mate_stm_per_pos.append(stm_mate)
+            mate_stm_per_pos.append(timeline.mate)
         else:
             # ----- Skipped position -----
-            # game over, forced move, or tablebase territory.
-            # We still need eval and mate for continuity.
-            if board.is_game_over():
-                stm_eval = 0.0
-                stm_mate = None
-            else:
-                stm_eval, stm_mate = stockfish.quick_evaluate_with_mate(board)
-
-            # Carry forward prev_eval for the next position.
-            # If we already had a prev_eval from the last analyzed position,
-            # just negate it (opponent's perspective). Otherwise use this
-            # position's quick-eval.
-            if prev_eval is not None:
-                prev_eval = -prev_eval
-            else:
-                prev_eval = -stm_eval
-
-            # Normalize eval to White's perspective
-            white_eval = stm_eval if is_white else -stm_eval
+            # Without a coherent played-root score, the next actual position
+            # must run its own shallow depth-selection probe.
+            prev_eval = None
 
             move_data = AnalysisMoveData(
                 move_number=move_number,
@@ -333,9 +355,19 @@ def analyze_game(
                 best_line_evals={},
                 mate_in=None,
                 played_move_eval_drop=None,
+                matched_best_eval=None,
+                matched_played_eval=None,
+                comparison_depth=result.comparison_depth if result is not None else None,
+                comparison_method=result.comparison_method if result is not None else None,
+                comparison_status=comparison_status,
+                cti_skip_reason=cti_skip_reason,
             )
-            mate_stm_per_pos.append(stm_mate)
+            mate_stm_per_pos.append(timeline.mate)
             is_minefield = False
+
+        if move_results:
+            move_results[-1].eval_after = round(white_eval, 2)
+            move_results[-1].mate_in = white_mate
 
         move_results.append(move_data)
 
@@ -357,6 +389,12 @@ def analyze_game(
     # The last move's eval_after requires a separate Stockfish evaluation
     # of the final position.
     with diagnostic_stage("result_finalization"):
-        populate_eval_after(move_results, mate_stm_per_pos, positions, stockfish)
+        populate_eval_after(
+            move_results,
+            mate_stm_per_pos,
+            positions,
+            stockfish,
+            final_prev_eval=prev_eval,
+        )
 
     yield AnalysisCompleteEvent(moves=move_results, minefields=minefields)

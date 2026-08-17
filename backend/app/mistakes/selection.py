@@ -17,6 +17,9 @@ def derive_mistake_suggestions(
         raise ValueError("study_side must be white or black")
 
     request = analysis_run.get("request", {})
+    analysis_scope = request.get("analysis_scope", "both")
+    if analysis_scope != "both" and analysis_scope != study_side:
+        raise ValueError(f"{study_side.capitalize()} was not analyzed in this run")
     result = analysis_run.get("result", {})
     contexts = result.get("move_context", [])
     acceptable_drop = float(request.get("acceptable_drop", 0.5))
@@ -27,6 +30,10 @@ def derive_mistake_suggestions(
 
     for ply, move in enumerate(result.get("moves", [])):
         if move.get("side") != study_side:
+            continue
+        # A failed coherent comparison is never admissible evidence for a
+        # training claim, even if a partial/stale payload still has values.
+        if move.get("comparison_status") != "complete":
             continue
         objective_loss = move.get("played_move_eval_drop")
         reasons: list[str] = []
@@ -76,6 +83,12 @@ def derive_mistake_suggestions(
             "stockfish_eval": move.get("stockfish_eval"),
             "eval_after": move.get("eval_after"),
             "mate_in": move.get("mate_in"),
+            "played_move_eval_drop": move.get("played_move_eval_drop"),
+            "matched_best_eval": move.get("matched_best_eval"),
+            "matched_played_eval": move.get("matched_played_eval"),
+            "comparison_depth": move.get("comparison_depth"),
+            "comparison_method": move.get("comparison_method"),
+            "comparison_status": move.get("comparison_status", "not_applicable"),
             "acceptable_drop": acceptable_drop,
             "minefield_threshold": minefield_threshold,
             "blunder_threshold": request.get("blunder_threshold"),

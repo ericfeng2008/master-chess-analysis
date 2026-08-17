@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from app.analysis.data_models import AnalysisCompleteEvent
+from app.analysis.data_models import AnalysisCompleteEvent, AnalysisMoveData
 from app.mistakes import MistakeRepository
 from app.models.schemas import AnalyzeRequest
 from app.persistence import AnalysisRepository, Database
@@ -164,6 +165,36 @@ def test_upload_restores_first_game_history_without_analyzing_trailing_games(tmp
     assert listing["total"] == 1 and listing["items"][0]["metadata"]["Event"] == "Other"
 
 
+def test_upload_preserves_schema_three_history_without_restoring_it_as_current(tmp_path):
+    app, repository = make_app(tmp_path)
+    client = TestClient(app)
+    first = upload(client).json()
+    legacy_snapshot = replace(
+        build_analysis_snapshot(
+            first["pgn"],
+            request=AnalyzeRequest(pgn=first["pgn"], game_id=first["game_id"]).model_dump(),
+            engine=app.state.stockfish.identity,
+            maia={"model": "maia3-79m", "checkpoint": "model.pt", "device": "cpu", "use_history": True},
+            moves=[],
+            minefields=[],
+            game_id=first["game_id"],
+        ),
+        metric_schema_version=3,
+    )
+    legacy_id = repository.create_analysis_run(legacy_snapshot)
+
+    restored = upload(client).json()
+
+    assert restored["preferred_analysis_run_id"] is None
+    assert [item["id"] for item in restored["analysis_history"]] == [legacy_id]
+    assert restored["analysis_history"][0]["is_legacy"] is True
+    explicit = client.get(
+        f"/api/stored-games/{first['game_id']}?analysis_run_id={legacy_id}"
+    ).json()
+    assert explicit["analysis"]["id"] == legacy_id
+    assert explicit["analysis"]["is_legacy"] is True
+
+
 def test_multi_game_upload_degrades_to_first_game_in_memory_without_persistence(tmp_path):
     app, _repository = make_app(tmp_path, persistence=False)
     client = TestClient(app)
@@ -214,16 +245,74 @@ def test_exact_cache_hit_skips_engine_and_changed_settings_create_history(tmp_pa
         yield AnalysisCompleteEvent(moves=[], minefields=[])
 
     monkeypatch.setattr(analysis_module, "analyze_game", fake_analyze_game)
-    changed = request.model_copy(update={"engine_depth": 13})
+    changed = request.model_copy(update={"analysis_scope": "black"})
     calculated = complete_event(client.post("/api/analyze", json=changed.model_dump()))
     assert calculated["cache_hit"] is False
     assert calculated["analysis_run_id"] != run_id
     assert len(calculated["analysis_history"]) == 2
     assert len(calls) == 1 and app.state.stockfish_lock.entries == 1
+    assert calls[0]["analysis_scope"] == "black"
 
     cached_again = complete_event(client.post("/api/analyze", json=changed.model_dump()))
     assert cached_again["cache_hit"] is True
     assert len(calls) == 1 and app.state.stockfish_lock.entries == 1
+
+
+def test_api_serializes_unavailable_comparison_without_metric_claims(tmp_path, monkeypatch):
+    app, _repository = make_app(tmp_path)
+    client = TestClient(app)
+    imported = upload(client).json()
+    unavailable = AnalysisMoveData(
+        move_number=1,
+        side="white",
+        move="e4",
+        fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        stockfish_eval=0.0,
+        eval_after=0.0,
+        cti=None,
+        cti_lower_bound=None,
+        cti_upper_bound=None,
+        cti_remaining_mass=None,
+        cti_is_approximate=False,
+        best_move=None,
+        good_moves=[],
+        good_moves_with_eval={},
+        is_minefield=False,
+        mbi_classification=None,
+        mbi_maia_prob=None,
+        eig_value=None,
+        is_eig_flagged=False,
+        is_brilliant=False,
+        bri_maia_prob=None,
+        epe_score=None,
+        best_line=[],
+        best_line_evals={},
+        mate_in=None,
+        comparison_depth=18,
+        comparison_method="coherent_restricted_multipv_v1",
+        comparison_status="unavailable",
+    )
+    monkeypatch.setattr(
+        analysis_module,
+        "analyze_game",
+        lambda **_kwargs: iter([AnalysisCompleteEvent(moves=[unavailable], minefields=[])]),
+    )
+
+    completed = complete_event(
+        client.post(
+            "/api/analyze",
+            json=AnalyzeRequest(
+                pgn=imported["pgn"], game_id=imported["game_id"], engine_depth=19
+            ).model_dump(),
+        )
+    )
+    move = completed["moves"][0]
+    assert move["comparison_status"] == "unavailable"
+    assert move["comparison_method"] == "coherent_restricted_multipv_v1"
+    assert move["cti"] is None and move["best_move"] is None
+    assert move["good_moves"] == [] and move["is_minefield"] is False
+    assert move["mbi_classification"] is None and move["eig_value"] is None
+    assert move["is_brilliant"] is False
 
 
 def test_analysis_rejects_mismatched_game_id(tmp_path):

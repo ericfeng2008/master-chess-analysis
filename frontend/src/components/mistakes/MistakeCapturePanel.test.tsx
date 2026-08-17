@@ -31,4 +31,11 @@ describe('MistakeCapturePanel',()=>{
     expect(await screen.findByText('No additional mistakes for white.')).toBeInTheDocument()
     expect(screen.getByText(/already saved anywhere in this game’s history/i)).toBeInTheDocument()
   })
+  it('identifies a side omitted by a single-side analysis without requesting suggestions',async()=>{
+    render(<MistakeCapturePanel analysisRunId="run-white" studySide="black" analysisScope="white" onStudySideChange={vi.fn()} onJumpToMove={vi.fn()} onOpenLibrary={vi.fn()}/>)
+    expect(await screen.findByText('Black was not analyzed in this run.')).toBeInTheDocument()
+    expect(screen.queryByText('No additional mistakes for black.')).not.toBeInTheDocument()
+    expect(screen.getByRole('button',{name:/Save selected mistakes/})).toBeDisabled()
+    expect(api.get).not.toHaveBeenCalled()
+  })
 })

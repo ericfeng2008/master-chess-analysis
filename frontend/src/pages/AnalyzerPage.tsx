@@ -21,14 +21,14 @@ import { useExploration } from "../hooks/useExploration";
 import { useGameAnalysis } from "../hooks/useGameAnalysis";
 import { useMoveNavigation } from "../hooks/useMoveNavigation";
 import { useVariationEvaluation } from "../hooks/useVariationEvaluation";
-import { getAnalysisRun, getLogicalGame, openStoredGame } from "../api/mistakes";
+import { getLogicalGame, openStoredGame } from "../api/mistakes";
 import { bestLineFens } from "../utils/bestLineFens";
 import { resolveDisplayedPositionEvaluation } from "../utils/displayedPositionEvaluation";
 import { validateSavedGameSummaryResponse, validateStoredGameOpenResponse } from "../utils/storedGameValidation";
 import { parsePgnHeaders } from "../utils/pgnHeaders";
 import { parsePgnToMoves } from "../utils/pgnParser";
 import { formatDisplayedGameDetails } from "../utils/pgnImportSummary";
-import type { AnalysisHistoryEntry, PgnUploadResponse } from "../types";
+import type { AnalysisHistoryEntry, AnalysisScope, PgnUploadResponse } from "../types";
 import type { GameMetadata, StoredGame, StoredGameMetadata, StoredGameSummary } from "../types/mistakes";
 
 type Theme = "dark" | "light";
@@ -41,6 +41,22 @@ function metadataFromGame(game: Pick<StoredGameMetadata, 'id' | 'metadata' | 'me
 
 function storedNumber(value: number | undefined, fallback: number) {
   return Number.isFinite(value) ? value as number : fallback
+}
+
+function mergeAnalysisHistory(
+  gameId: string | null,
+  ...sources: Array<AnalysisHistoryEntry[] | undefined>
+) {
+  const entries = new Map<string, AnalysisHistoryEntry>();
+  for (const source of sources) {
+    for (const entry of source ?? []) {
+      if (gameId && entry.game_id !== gameId) continue;
+      if (!entries.has(entry.id)) entries.set(entry.id, entry);
+    }
+  }
+  return [...entries.values()].sort(
+    (left, right) => right.created_at.localeCompare(left.created_at) || right.id.localeCompare(left.id),
+  );
 }
 
 export function AnalyzerPage() {
@@ -79,9 +95,10 @@ export function AnalyzerPage() {
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [perspective, setPerspective] = useState<"white" | "black">("white");
 
-  const [acceptableDrop, setAcceptableDrop] = useState(0.5);
+  const [acceptableDrop, setAcceptableDrop] = useState(0.3);
   const [minefieldThreshold, setMinefieldThreshold] = useState(0.8);
   const [engineDepth, setEngineDepth] = useState(18);
+  const [analysisScope, setAnalysisScope] = useState<AnalysisScope>("both");
   const [showConfig, setShowConfig] = useState(true);
 
   const [blunderThreshold, setBlunderThreshold] = useState(1.0);
@@ -93,9 +110,14 @@ export function AnalyzerPage() {
   const [maia3BlackElo, setMaia3BlackElo] = useState(DEFAULT_MAIA3_ELO);
 
   const restoreStoredAnalysis = (game: StoredGame, selectedPly = 0) => {
-    setAcceptableDrop(storedNumber(game.request.acceptable_drop, 0.5));
-    setMinefieldThreshold(storedNumber(game.request.minefield_threshold, 0.8));
-    setEngineDepth(storedNumber(game.request.engine_depth, 18));
+    setAcceptableDrop(Math.min(0.4, Math.max(0.2, storedNumber(game.request.acceptable_drop, 0.3))));
+    setMinefieldThreshold(Math.min(0.95, Math.max(0.8, storedNumber(game.request.minefield_threshold, 0.8))));
+    setEngineDepth(Math.min(28, Math.max(16, storedNumber(game.request.engine_depth, 18))));
+    setAnalysisScope(
+      game.request.analysis_scope === "white" || game.request.analysis_scope === "black"
+        ? game.request.analysis_scope
+        : "both",
+    );
     setBlunderThreshold(storedNumber(game.request.blunder_threshold, 1));
     setMbiTrapThreshold(storedNumber(game.request.mbi_trap_threshold, 0.4));
     setMbiOutlierThreshold(storedNumber(game.request.mbi_outlier_threshold, 0.05));
@@ -129,9 +151,10 @@ export function AnalyzerPage() {
         return null;
       }
 
-      const evalAfter = m.eval_after;
-      const bestEval = m.stockfish_eval;
-      const drop = m.side === "white" ? bestEval - evalAfter : evalAfter - bestEval;
+      const drop = m.played_move_eval_drop;
+      if (drop == null) {
+        return null;
+      }
       if (drop < blunderThreshold) {
         return null;
       }
@@ -141,6 +164,14 @@ export function AnalyzerPage() {
   }, [cti.result, blunderThreshold]);
 
   const hasResult = cti.result != null;
+  const displayedAnalysisHistory = useMemo(
+    () => mergeAnalysisHistory(
+      cti.result?.game_id ?? gameId,
+      cti.result?.analysis_history,
+      analysisHistory,
+    ),
+    [analysisHistory, cti.result?.analysis_history, cti.result?.game_id, gameId],
+  );
 
   const navOptions = useMemo(
     () =>
@@ -196,6 +227,7 @@ export function AnalyzerPage() {
     briThreshold,
     maia3WhiteElo,
     maia3BlackElo,
+    analysisScope,
     setPgn,
     setGameId,
     setAnalysisHistory,
@@ -215,6 +247,7 @@ export function AnalyzerPage() {
       exploration.clearExplorations();
       setVariationState(null);
       if (!result.preferred_analysis_run_id) {
+        setAnalysisScope("both");
         setMaia3WhiteElo(DEFAULT_MAIA3_ELO);
         setMaia3BlackElo(DEFAULT_MAIA3_ELO);
         setShowConfig(true);
@@ -269,6 +302,7 @@ export function AnalyzerPage() {
       if (game.analysis) restoreStoredAnalysis(game.analysis);
       else {
         cti.clearAnalysis();
+        setAnalysisScope("both");
         setMaia3WhiteElo(DEFAULT_MAIA3_ELO);
         setMaia3BlackElo(DEFAULT_MAIA3_ELO);
         setShowConfig(true);
@@ -508,14 +542,26 @@ export function AnalyzerPage() {
             </div>
 
             <AnalysisHistoryPanel
-              history={cti.result?.analysis_history ?? analysisHistory}
+              history={displayedAnalysisHistory}
               activeRunId={cti.result?.analysis_run_id ?? null}
               cacheHit={Boolean(cti.result?.cache_hit)}
               disabled={cti.isAnalyzing}
               onSelect={(runId) => {
                 setUploadError(null);
-                void getAnalysisRun(runId)
-                  .then((run) => restoreStoredAnalysis(run))
+                const entry = displayedAnalysisHistory.find((candidate) => candidate.id === runId);
+                if (!entry) {
+                  setUploadError("The selected analysis is no longer available in this game's history.");
+                  return;
+                }
+                void getLogicalGame(entry.game_id, runId)
+                  .then((logical) => {
+                    validateStoredGameOpenResponse(logical, entry.game_id);
+                    if (!logical.analysis || logical.analysis.id !== runId) {
+                      throw new Error("The selected analysis could not be restored.");
+                    }
+                    setAnalysisHistory(logical.analysis_history);
+                    restoreStoredAnalysis(logical.analysis);
+                  })
                   .catch((error: unknown) => setUploadError(error instanceof Error ? error.message : String(error)));
               }}
             />
@@ -634,6 +680,8 @@ export function AnalyzerPage() {
               setShowConfig={setShowConfig}
               engineDepth={engineDepth}
               setEngineDepth={setEngineDepth}
+              analysisScope={analysisScope}
+              setAnalysisScope={setAnalysisScope}
               acceptableDrop={acceptableDrop}
               setAcceptableDrop={setAcceptableDrop}
               minefieldThreshold={minefieldThreshold}
@@ -686,6 +734,7 @@ export function AnalyzerPage() {
         open={mistakeCaptureOpen && Boolean(cti.result?.analysis_run_id)}
         analysisRunId={cti.result?.analysis_run_id ?? ""}
         studySide={perspective}
+        analysisScope={cti.analysisScopeUsed ?? analysisScope}
         players={{ white: effectiveHeaders.White, black: effectiveHeaders.Black }}
         onStudySideChange={setPerspective}
         onJumpToMove={(ply) => { cti.selectMove(ply); nav.goTo(ply) }}

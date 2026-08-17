@@ -9,6 +9,7 @@ import chess
 
 from app.persistence import AnalysisRepository, Database
 from app.persistence.models import json_dumps, json_loads
+from app.persistence.provenance import METRIC_SCHEMA_VERSION
 
 from .models import MistakeAttempt, MistakeOutcome, StoredGameSummary
 from .selection import derive_mistake_suggestions
@@ -77,6 +78,7 @@ class MistakeRepository:
                            count(DISTINCT m.id) AS mistake_count,
                            (SELECT newest.id FROM analysis_runs newest
                             WHERE newest.game_id=g.id
+                              AND newest.metric_schema_version={METRIC_SCHEMA_VERSION}
                             ORDER BY newest.created_at DESC,newest.id DESC LIMIT 1)
                            AS preferred_analysis_run_id
                     FROM games g

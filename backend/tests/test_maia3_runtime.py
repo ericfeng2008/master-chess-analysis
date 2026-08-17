@@ -41,6 +41,27 @@ class Maia3RuntimeTests(unittest.TestCase):
 
         self.assertEqual(request.maia3_white_elo, 2600)
         self.assertEqual(request.maia3_black_elo, 2600)
+        self.assertEqual(request.acceptable_drop, 0.3)
+        self.assertEqual(request.analysis_scope, "both")
+
+    def test_analyze_request_validates_analysis_scope(self):
+        for scope in ("both", "white", "black"):
+            self.assertEqual(
+                AnalyzeRequest(pgn="1. e4 *", analysis_scope=scope).analysis_scope,
+                scope,
+            )
+
+        with self.assertRaises(ValidationError):
+            AnalyzeRequest(pgn="1. e4 *", analysis_scope="either")
+
+    def test_analyze_request_validates_acceptable_drop_range(self):
+        self.assertEqual(AnalyzeRequest(pgn="1. e4 *", acceptable_drop=0.2).acceptable_drop, 0.2)
+        self.assertEqual(AnalyzeRequest(pgn="1. e4 *", acceptable_drop=0.4).acceptable_drop, 0.4)
+
+        with self.assertRaises(ValidationError):
+            AnalyzeRequest(pgn="1. e4 *", acceptable_drop=0.19)
+        with self.assertRaises(ValidationError):
+            AnalyzeRequest(pgn="1. e4 *", acceptable_drop=0.41)
 
     def test_analyze_request_validates_maia3_elo_range(self):
         with self.assertRaises(ValidationError):

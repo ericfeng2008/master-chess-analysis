@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import sqlite3
 
@@ -15,7 +16,11 @@ from app.persistence.database import (
     MIGRATION_5,
     SCHEMA_VERSION,
 )
-from app.persistence.provenance import build_analysis_snapshot, parse_pgn_games
+from app.persistence.provenance import (
+    METRIC_SCHEMA_VERSION,
+    build_analysis_snapshot,
+    parse_pgn_games,
+)
 
 
 PGN = '[Event "Original"]\n[White "A"]\n[Black "B"]\n\n1. e4 e5 2. Nf3 *'
@@ -26,19 +31,68 @@ DECORATED_PGN = (
 OTHER_PGN = '[Event "Other"]\n[White "C"]\n[Black "D"]\n\n1. d4 d5 2. c4 *'
 
 
-def snapshot(pgn: str = PGN, depth: int = 12):
+def snapshot(pgn: str = PGN, depth: int = 12, analysis_scope: str = "both"):
     return build_analysis_snapshot(
         pgn,
         request={
             "engine_depth": depth,
             "acceptable_drop": 0.5,
             "minefield_threshold": 0.8,
+            "analysis_scope": analysis_scope,
         },
         engine={"name": "Stockfish 17", "path": "/one/stockfish", "threads": 2},
         maia={"model": "maia3-79m", "checkpoint": "model.pt", "use_history": True},
         moves=[],
         minefields=[],
     )
+
+
+def test_analysis_scope_separates_completed_cache_and_checkpoints(tmp_path):
+    database = Database(tmp_path / "analysis.db")
+    database.initialize()
+    analyses = AnalysisRepository(database)
+    game = analyses.upsert_game(PGN)
+
+    both_id = analyses.create_analysis_run(snapshot(PGN, 12, "both"))
+    white_id = analyses.create_analysis_run(snapshot(PGN, 12, "white"))
+    assert white_id != both_id
+    assert {
+        entry["request"]["analysis_scope"]
+        for entry in analyses.analysis_history(game["id"])
+    } == {"both", "white"}
+
+    black = snapshot(PGN, 12, "black")
+    black_digest = analyses.compatible_fingerprint(
+        game,
+        black.request,
+        black.engine,
+        black.maia,
+        black.metric_schema_version,
+    )
+    analyses.save_analysis_checkpoint(
+        game_id=game["id"],
+        analysis_fingerprint=black_digest,
+        pgn_fingerprint=game["game_fingerprint"],
+        normalized_pgn=game["normalized_pgn"],
+        request=black.request,
+        engine=black.engine,
+        maia=black.maia,
+        metric_schema_version=black.metric_schema_version,
+        result={"moves": [], "minefields": []},
+        moves_analyzed=0,
+        total_moves=game["move_count"],
+    )
+
+    white = snapshot(PGN, 12, "white")
+    white_digest = analyses.compatible_fingerprint(
+        game,
+        white.request,
+        white.engine,
+        white.maia,
+        white.metric_schema_version,
+    )
+    assert analyses.find_analysis_checkpoint(game["id"], white_digest) is None
+    assert analyses.find_analysis_checkpoint(game["id"], black_digest) is not None
 
 
 def create_schema4(path) -> None:
@@ -85,6 +139,77 @@ def test_game_upsert_history_cache_and_grouped_listing(tmp_path):
     assert listing["total"] == 1
     assert listing["items"][0]["analysis_count"] == 2
     assert listing["items"][0]["preferred_analysis_run_id"] == run_18
+
+
+def test_earlier_metric_history_is_legacy_and_never_preferred_or_cache_compatible(tmp_path):
+    database = Database(tmp_path / "analysis.db")
+    database.initialize()
+    analyses = AnalysisRepository(database)
+    game = analyses.upsert_game(PGN)
+
+    legacy_snapshot = replace(snapshot(PGN, 12), metric_schema_version=3)
+    legacy_id = analyses.create_analysis_run(legacy_snapshot)
+
+    assert METRIC_SCHEMA_VERSION == 5
+    assert analyses.preferred_analysis_run(game["id"]) is None
+    assert analyses.game_import_result(game)["preferred_analysis_run_id"] is None
+    assert analyses.find_compatible_analysis(
+        game["id"], legacy_snapshot.analysis_fingerprint
+    ) is None
+    legacy = analyses.get_analysis_run(legacy_id)
+    assert legacy and legacy["metric_schema_version"] == 3
+    assert legacy["is_legacy"] is True
+    assert analyses.analysis_history(game["id"])[0]["is_legacy"] is True
+
+    current_id = analyses.create_analysis_run(snapshot(PGN, 12))
+    assert current_id != legacy_id
+    assert analyses.preferred_analysis_run(game["id"])["id"] == current_id
+    history = analyses.analysis_history(game["id"])
+    assert {item["id"] for item in history} == {legacy_id, current_id}
+    assert {item["metric_schema_version"] for item in history} == {3, 5}
+    assert {item["id"] for item in history if item["is_legacy"]} == {legacy_id}
+
+    with database.connect() as connection:
+        stored = connection.execute(
+            "SELECT metric_schema_version FROM analysis_runs WHERE id=?", (legacy_id,)
+        ).fetchone()
+        assert stored["metric_schema_version"] == 3
+
+
+def test_earlier_metric_checkpoint_is_not_resumed_by_schema_five(tmp_path):
+    database = Database(tmp_path / "analysis.db")
+    database.initialize()
+    analyses = AnalysisRepository(database)
+    game = analyses.upsert_game(PGN)
+    request = snapshot(PGN, 12).request
+    engine = snapshot(PGN, 12).engine
+    maia = snapshot(PGN, 12).maia
+    legacy_digest = analyses.compatible_fingerprint(game, request, engine, maia, 3)
+    current_digest = analyses.compatible_fingerprint(
+        game, request, engine, maia, METRIC_SCHEMA_VERSION
+    )
+    analyses.save_analysis_checkpoint(
+        game_id=game["id"],
+        analysis_fingerprint=legacy_digest,
+        pgn_fingerprint=game["game_fingerprint"],
+        normalized_pgn=game["normalized_pgn"],
+        request=request,
+        engine=engine,
+        maia=maia,
+        metric_schema_version=3,
+        result={"moves": []},
+        moves_analyzed=0,
+        total_moves=game["move_count"],
+    )
+
+    assert analyses.find_analysis_checkpoint(game["id"], current_digest) is None
+    assert analyses.find_analysis_checkpoint(game["id"], legacy_digest) is None
+    with database.connect() as connection:
+        legacy = connection.execute(
+            "SELECT metric_schema_version FROM analysis_checkpoints WHERE analysis_fingerprint=?",
+            (legacy_digest,),
+        ).fetchone()
+        assert legacy["metric_schema_version"] == 3
 
 
 def test_batch_upsert_persists_unique_games_without_analysis_rows(tmp_path):

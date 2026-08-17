@@ -20,6 +20,9 @@ from app.analysis.data_models import (
     CTI_POLICY_COVERAGE,
     MIN_ANALYSIS_DEPTH,
     PROBE_DEPTH,
+    ROOT_COMPARISON_METHOD,
+    RootEvaluationSnapshot,
+    TimelineEvaluation,
 )
 from app.analysis.diagnostics import diagnostic_stage
 from app.analysis.evaluation import terminal_eval_white
@@ -113,11 +116,43 @@ def _select_depth(eval_estimate: float, full_depth: int) -> int:
 
 # CTI: Critical Tension Index
 
+
+def evaluate_timeline_position(
+    board: chess.Board,
+    stockfish: StockfishClient,
+    *,
+    prev_eval: float | None,
+    full_depth: int,
+) -> TimelineEvaluation | None:
+    """Return one unrestricted single-PV result for the evaluation timeline."""
+    if board.is_game_over() or board.legal_moves.count() == 0:
+        return None
+
+    eval_estimate = (
+        prev_eval
+        if prev_eval is not None
+        else stockfish.quick_evaluate(board, depth=PROBE_DEPTH)
+    )
+    analysis_depth = _select_depth(eval_estimate, full_depth)
+    with diagnostic_stage("timeline_single_pv"):
+        result = stockfish.evaluate_best_move(board, depth=analysis_depth)
+    if result is None:
+        return None
+    move, evaluation, pv, mate = result
+    return TimelineEvaluation(
+        move=move,
+        evaluation=evaluation,
+        pv=tuple(pv),
+        mate=mate,
+        depth=analysis_depth,
+    )
+
+
 def compute_cti(
     board: chess.Board,
     stockfish: StockfishClient,
     maia: Maia3Client,
-    acceptable_drop: float = 0.5,
+    acceptable_drop: float = 0.3,
     prev_eval: float | None = None,
     full_depth: int = 18,
     maia_policy_cache: MaiaPolicyCache | None = None,
@@ -126,6 +161,7 @@ def compute_cti(
     history_fens: Sequence[str] | None = None,
     played_move: chess.Move | None = None,
     minefield_threshold: float | None = None,
+    timeline: TimelineEvaluation | None = None,
 ) -> CTIResult | None:
     """Compute the Critical Tension Index for a position.
 
@@ -154,9 +190,11 @@ def compute_cti(
             to be considered "good" (member of set S). Default 0.5.
         prev_eval: Eval estimate from the previous position (negated, so from
             current side-to-move perspective). If provided, the Phase-1
-            probe is skipped and this value is used for depth selection
-            and as the probe_eval for evaluate_all_moves.
+            probe is skipped and this value is used for depth selection.
         full_depth: The configured full-analysis depth.
+        timeline: Optional already-computed single-PV timeline result. Its root
+            is used for discovery while its score and PV remain non-authoritative
+            for coherent CTI comparisons.
 
     Returns:
         A CTIResult with all computed data, or None if the position should
@@ -174,13 +212,16 @@ def compute_cti(
     if len(board.piece_map()) <= 6:
         return None
 
-    # ----- Eval estimate for depth selection -----
-    # Use carry-forward eval from the previous position if available;
-    # otherwise run a quick shallow search as the Phase 1 probe.
-    eval_estimate = prev_eval if prev_eval is not None else stockfish.quick_evaluate(board, depth=PROBE_DEPTH)
-
-    # ----- Depth triage: reduce depth for lopsided positions -----
-    analysis_depth = _select_depth(eval_estimate, full_depth)
+    if timeline is None:
+        timeline = evaluate_timeline_position(
+            board,
+            stockfish,
+            prev_eval=prev_eval,
+            full_depth=full_depth,
+        )
+    if timeline is None:
+        return None
+    analysis_depth = timeline.depth
 
     with diagnostic_stage("maia_inference"):
         policy = _predict_maia(
@@ -202,11 +243,7 @@ def compute_cti(
     if not sorted_policy:
         return None
 
-    with diagnostic_stage("cti_best"):
-        best_result = stockfish.evaluate_best_move(board, depth=analysis_depth)
-    if best_result is None:
-        return None
-    best_move_obj, best_eval, best_pv, best_mate = best_result
+    discovered_move = timeline.move
 
     candidate_moves: list[chess.Move] = []
     candidate_set: set[chess.Move] = set()
@@ -219,7 +256,7 @@ def compute_cti(
             break
 
     # These roots are required by best-line/BRI, EIG, and MBI respectively.
-    required_moves = [best_move_obj, sorted_policy[0][0]]
+    required_moves = [discovered_move, sorted_policy[0][0]]
     if played_move is not None:
         required_moves.append(played_move)
     for required in required_moves:
@@ -230,25 +267,49 @@ def compute_cti(
     def evaluate_candidates(
         moves: Sequence[chess.Move],
         stage: str,
-    ) -> dict[chess.Move, tuple[float, list[chess.Move], int | None]]:
+    ) -> RootEvaluationSnapshot:
         with diagnostic_stage(stage):
-            results = stockfish.evaluate_root_moves(board, list(moves), depth=analysis_depth)
-            # UCI engines should return every requested root. Preserve a complete
-            # uncertainty accounting even if an individual MultiPV line is absent.
-            for missing in moves:
-                if missing not in results:
-                    results[missing] = stockfish.evaluate_move(board, missing, depth=analysis_depth)
-        return results
+            return stockfish.evaluate_root_snapshot(
+                board,
+                list(moves),
+                depth=analysis_depth,
+                retry_incomplete=True,
+            )
 
-    evaluated = evaluate_candidates(candidate_moves, "cti_candidates")
-    # Preserve the unrestricted best search as the objective baseline and PV.
-    evaluated[best_move_obj] = (best_eval, best_pv, best_mate)
+    def unavailable_result() -> CTIResult:
+        return CTIResult(
+            cti=None,
+            cti_lower_bound=None,
+            cti_upper_bound=None,
+            cti_remaining_mass=0.0,
+            cti_is_approximate=False,
+            good_moves=[],
+            best_move=None,
+            best_eval=None,
+            best_mate=None,
+            all_evals={},
+            maia_policy=policy,
+            best_pv=[],
+            played_move_eval=None,
+            comparison_depth=analysis_depth,
+            comparison_method=ROOT_COMPARISON_METHOD,
+            comparison_status="unavailable",
+        )
+
+    snapshot = evaluate_candidates(candidate_moves, "cti_candidates")
+    authoritative = snapshot.authoritative()
+    if authoritative is None:
+        return unavailable_result()
+    best_move_obj, best_eval, best_pv, best_mate = authoritative
+    if not best_pv or best_pv[0] != best_move_obj:
+        best_pv = [best_move_obj, *best_pv]
+    evaluated = snapshot.evaluations
 
     def summarize() -> tuple[list[chess.Move], float, float, float, float]:
         good = [
             candidate
             for candidate, (evaluation, _pv, _mate) in evaluated.items()
-            if best_eval - evaluation <= acceptable_drop
+            if best_eval - evaluation < acceptable_drop
         ]
         good_probability = sum(policy.get(candidate, 0.0) for candidate in good)
         remaining_probability = sum(
@@ -266,8 +327,16 @@ def compute_cti(
         while lower_bound < minefield_threshold <= upper_bound and remaining_moves:
             batch = remaining_moves[:3]
             remaining_moves = remaining_moves[3:]
-            new_results = evaluate_candidates(batch, "cti_refinement")
-            evaluated.update(new_results)
+            candidate_moves.extend(batch)
+            candidate_set.update(batch)
+            snapshot = evaluate_candidates(candidate_moves, "cti_refinement")
+            authoritative = snapshot.authoritative()
+            if authoritative is None:
+                return unavailable_result()
+            best_move_obj, best_eval, best_pv, best_mate = authoritative
+            if not best_pv or best_pv[0] != best_move_obj:
+                best_pv = [best_move_obj, *best_pv]
+            evaluated = snapshot.evaluations
             good_moves, lower_bound, upper_bound, remaining_mass, cti = summarize()
 
     exact = remaining_mass <= 1e-12
@@ -284,11 +353,16 @@ def compute_cti(
         cti_remaining_mass=remaining_mass,
         cti_is_approximate=not exact,
         good_moves=good_moves,
+        best_move=best_move_obj,
         best_eval=best_eval,
         best_mate=best_mate,
         all_evals=all_evals,
         maia_policy=policy,
         best_pv=best_pv,
+        played_move_eval=all_evals.get(played_move) if played_move is not None else None,
+        comparison_depth=analysis_depth,
+        comparison_method=ROOT_COMPARISON_METHOD,
+        comparison_status="complete",
     )
 
 
@@ -299,6 +373,7 @@ def populate_eval_after(
     mate_stm_per_pos: list[int | None],
     positions: list[tuple[chess.Board, chess.Move, int, str, tuple[str, ...]]],
     stockfish: StockfishClient,
+    final_prev_eval: float | None = None,
 ) -> None:
     """Fill in ``eval_after`` and ``mate_in`` fields on move-results.
 
@@ -308,7 +383,7 @@ def populate_eval_after(
     resulting position's evaluation.
 
     For the last move in the game, there is no "next position", so a separate
-    quick_evaluate is run on the final position.
+    single-PV timeline evaluation is run on a non-terminal final position.
 
     Mate normalization: ``mate_stm_per_pos`` stores mate-in-N from the
     side-to-move perspective. This function converts to White's perspective:
@@ -323,6 +398,8 @@ def populate_eval_after(
             each position, parallel to move_results.
         positions: The (board, move, move_number, side) tuples for each position.
         stockfish: Stockfish engine client for evaluating the final position.
+        final_prev_eval: Actual played-root estimate for the final position,
+            when the last decision had complete coherent evidence.
     """
     # ----- Shift eval forward: eval_after[i] = stockfish_eval[i+1] -----
     for i in range(len(move_results) - 1):
@@ -350,7 +427,18 @@ def populate_eval_after(
         final_eval_white = terminal_eval
         final_mate_white: int | None = 0 if final_board.is_checkmate() else None
     else:
-        final_stm, final_mate_stm = stockfish.quick_evaluate_with_mate(final_board)
+        final_timeline = evaluate_timeline_position(
+            final_board,
+            stockfish,
+            prev_eval=final_prev_eval,
+            full_depth=stockfish.depth,
+        )
+        if final_timeline is None:
+            raise RuntimeError(
+                "Stockfish did not return a timeline result for the final position"
+            )
+        final_stm = final_timeline.evaluation
+        final_mate_stm = final_timeline.mate
         # Normalize from side-to-move to White's perspective
         is_white_to_move = final_board.turn == chess.WHITE
         final_eval_white = final_stm if is_white_to_move else -final_stm

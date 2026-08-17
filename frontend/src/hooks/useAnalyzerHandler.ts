@@ -3,7 +3,7 @@ import { Chess } from 'chess.js';
 
 import { apiPostForm } from '../api/client';
 import { getAnalysisRun } from '../api/mistakes';
-import type { AnalysisHistoryEntry, PgnUploadResponse, ParsedMove, AnalyzeResult, PositionEvalResult } from '../types';
+import type { AnalysisHistoryEntry, AnalysisScope, PgnUploadResponse, ParsedMove, AnalyzeResult, PositionEvalResult } from '../types';
 import type { StoredGame } from '../types/mistakes';
 import { bestLineFens } from '../utils/bestLineFens';
 
@@ -31,6 +31,7 @@ export interface AnalyzerHandlersDeps {
     briThreshold: number,
     maia3WhiteElo: number,
     maia3BlackElo: number,
+    analysisScope?: AnalysisScope,
   ) => void;
   isExploring: boolean;
   currentExplorationIndex: number;
@@ -67,6 +68,7 @@ export interface AnalyzerHandlersDeps {
   briThreshold: number;
   maia3WhiteElo: number;
   maia3BlackElo: number;
+  analysisScope?: AnalysisScope;
   setPgn: (v: string | null) => void;
   setGameId: (v: string | null) => void;
   setAnalysisHistory: (v: AnalysisHistoryEntry[]) => void;
@@ -131,6 +133,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
     briThreshold,
     maia3WhiteElo,
     maia3BlackElo,
+    analysisScope = 'both',
     setPgn,
     setGameId,
     setAnalysisHistory,
@@ -224,6 +227,7 @@ export function useAnalyzerHandler(d: AnalyzerHandlersDeps) {
       briThreshold,
       maia3WhiteElo,
       maia3BlackElo,
+      analysisScope,
     );
   }
 

@@ -1,4 +1,5 @@
 import { ProgressBar } from "./ProgressBar";
+import type { AnalysisScope } from "../types";
 
 interface ConfigurationPanelProps {
   onOpenMistakes?: () => void;
@@ -6,6 +7,8 @@ interface ConfigurationPanelProps {
   setShowConfig: (v: boolean | ((prev: boolean) => boolean)) => void;
   engineDepth: number;
   setEngineDepth: (v: number) => void;
+  analysisScope?: AnalysisScope;
+  setAnalysisScope?: (v: AnalysisScope) => void;
   acceptableDrop: number;
   setAcceptableDrop: (v: number) => void;
   minefieldThreshold: number;
@@ -38,6 +41,8 @@ export function ConfigurationPanel({
   setShowConfig,
   engineDepth,
   setEngineDepth,
+  analysisScope = "both",
+  setAnalysisScope = () => undefined,
   acceptableDrop,
   setAcceptableDrop,
   minefieldThreshold,
@@ -93,11 +98,33 @@ export function ConfigurationPanel({
 
       {showConfig && (
         <div className="settings-grid">
+          <div className="analysis-scope-setting">
+            <span className="settings-slider-label">CTI analysis scope</span>
+            <div className="segment-control" role="group" aria-label="CTI analysis scope">
+              {([
+                ["both", "Both sides"],
+                ["white", "White"],
+                ["black", "Black"],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className="segment-button"
+                  aria-pressed={analysisScope === value}
+                  data-active={analysisScope === value}
+                  disabled={isAnalyzing}
+                  onClick={() => setAnalysisScope(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <Slider
             label="Stockfish Engine Depth"
             value={engineDepth}
             display={String(engineDepth)}
-            min={12}
+            min={16}
             max={28}
             step={1}
             onChange={setEngineDepth}
@@ -106,8 +133,8 @@ export function ConfigurationPanel({
             label="CTI: Acceptable Drop"
             value={acceptableDrop}
             display={acceptableDrop.toFixed(1)}
-            min={0.1}
-            max={2}
+            min={0.2}
+            max={0.4}
             step={0.1}
             onChange={setAcceptableDrop}
           />
@@ -115,8 +142,8 @@ export function ConfigurationPanel({
             label="CTI: Minefield Threshold"
             value={minefieldThreshold}
             display={minefieldThreshold.toFixed(2)}
-            min={0.5}
-            max={1}
+            min={0.8}
+            max={0.95}
             step={0.05}
             onChange={setMinefieldThreshold}
           />

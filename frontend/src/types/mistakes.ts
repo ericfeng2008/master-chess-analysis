@@ -29,6 +29,13 @@ export interface MistakeEvidence {
   stockfish_eval: number | null
   eval_after: number | null
   mate_in: number | null
+  played_move_eval_drop?: number | null
+  matched_best_eval?: number | null
+  matched_played_eval?: number | null
+  comparison_depth?: number | null
+  comparison_method?: string | null
+  comparison_status?: 'complete' | 'unavailable' | 'not_applicable'
+  cti_skip_reason?: 'initial_position' | 'side_not_selected' | null
   acceptable_drop: number
   minefield_threshold: number
   blunder_threshold: number
@@ -114,6 +121,7 @@ export interface StoredGame {
   engine: Record<string, unknown>
   maia: Record<string, unknown>
   metric_schema_version: number
+  is_legacy?: boolean
   result: AnalyzeResult
   created_at: string
   updated_at: string

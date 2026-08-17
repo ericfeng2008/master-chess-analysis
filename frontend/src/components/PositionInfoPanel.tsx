@@ -1,4 +1,5 @@
 import { Chess } from "chess.js";
+import { formatMoveDelta } from "../utils/moveDelta";
 
 type AnalysisMoveLike = {
   move_number: number;
@@ -18,6 +19,13 @@ type AnalysisMoveLike = {
   is_minefield: boolean;
   mbi_classification: string | null;
   mbi_maia_prob: number | null;
+  played_move_eval_drop?: number | null;
+  matched_best_eval?: number | null;
+  matched_played_eval?: number | null;
+  comparison_depth?: number | null;
+  comparison_method?: string | null;
+  comparison_status?: "complete" | "unavailable" | "not_applicable";
+  cti_skip_reason?: "initial_position" | "side_not_selected" | null;
   eig_value: number | null;
   is_eig_flagged: boolean;
   is_brilliant: boolean;
@@ -133,7 +141,7 @@ function GoodMoves({ ev }: { ev: PositionEvalResult }) {
         {others
           .map((m) => {
             const d = ev.good_moves_with_eval[m];
-            return d != null ? `${m}(${d >= 0 ? "+" : ""}${d.toFixed(2)})` : m;
+            return d != null ? `${m}(${formatMoveDelta(d)})` : m;
           })
           .join(", ")}
       </span>
@@ -235,6 +243,11 @@ function VariationInfo({
 function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
   const mPrefix = `${s.move_number}${s.side === "white" ? "." : "..."}`;
   const goodOthers = s.good_moves.filter((m) => m !== s.best_move);
+  const skipExplanation = s.cti_skip_reason === "initial_position"
+    ? "Decision analysis was skipped for the standard initial position."
+    : s.cti_skip_reason === "side_not_selected"
+      ? `CTI was not analyzed for ${s.side} in this run.`
+      : null;
 
   return (
     <div className="compact-grid text-sm">
@@ -248,20 +261,26 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
         <span className="metric-label">Eval:</span>{" "}
         <span className="text-[var(--insight)]">{s.mate_in !== null ? `#${s.mate_in}` : s.eval_after.toFixed(2)}</span>
       </div>
-      <div>
-        <span className="metric-label">CTI:</span>{" "}
-        <span style={{ color: s.side === "white" ? "var(--success)" : "var(--warning)" }}>
-          {formatCti(s)}
-        </span>
-      </div>
-      <div>
-        <span className="metric-label">Minefield:</span>{" "}
-        {s.is_minefield ? (
-          <span className="font-semibold text-[var(--warning)]">Yes</span>
-        ) : (
-          <span className="muted">No</span>
-        )}
-      </div>
+      {skipExplanation ? (
+        <div className="col-span-2 muted" role="status">{skipExplanation}</div>
+      ) : (
+        <>
+          <div>
+            <span className="metric-label">CTI:</span>{" "}
+            <span style={{ color: s.side === "white" ? "var(--success)" : "var(--warning)" }}>
+              {formatCti(s)}
+            </span>
+          </div>
+          <div>
+            <span className="metric-label">Minefield:</span>{" "}
+            {s.is_minefield ? (
+              <span className="font-semibold text-[var(--warning)]">Yes</span>
+            ) : (
+              <span className="muted">No</span>
+            )}
+          </div>
+        </>
+      )}
       {s.best_move && (
         <div className="col-span-2">
           <span className="metric-label">Best move:</span> <span className="mono">{s.best_move}</span>
@@ -274,10 +293,21 @@ function MainlineInfo({ selectedMove: s }: { selectedMove: AnalysisMoveLike }) {
             {goodOthers
               .map((m) => {
                 const d = s.good_moves_with_eval[m];
-                return d != null ? `${m}(${d >= 0 ? "+" : ""}${d.toFixed(2)})` : m;
+                return d != null ? `${m}(${formatMoveDelta(d)})` : m;
               })
               .join(", ")}
           </span>
+        </div>
+      )}
+      {s.comparison_status === "complete" && s.played_move_eval_drop != null && (
+        <div className="col-span-2">
+          <span className="metric-label">Played move loss:</span>{" "}
+          <span className="info-value">{s.played_move_eval_drop.toFixed(2)} pawns</span>
+        </div>
+      )}
+      {s.comparison_status === "unavailable" && (
+        <div className="col-span-2 text-[var(--warning)]">
+          Coherent root comparison unavailable
         </div>
       )}
       {s.mbi_classification && (

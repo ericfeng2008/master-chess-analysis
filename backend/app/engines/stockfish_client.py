@@ -11,6 +11,7 @@ from app.analysis.evaluation import (
     MATE_SCORE_PAWNS,
     terminal_eval_white,
 )
+from app.analysis.data_models import RootEvaluationSnapshot
 from app.analysis.diagnostics import record_cache_eviction, record_stockfish_search
 
 
@@ -299,6 +300,39 @@ class StockfishClient:
             self._cache_put(key, results)
         return self._clone_cached_result(results)
 
+    def evaluate_root_snapshot(
+        self,
+        board: chess.Board,
+        root_moves: list[chess.Move] | tuple[chess.Move, ...],
+        depth: int | None = None,
+        *,
+        retry_incomplete: bool = True,
+    ) -> RootEvaluationSnapshot:
+        """Return one complete ranked root snapshot, retrying the full set once.
+
+        A snapshot never fills missing roots with separately searched scores. The
+        insertion order returned by ``evaluate_root_moves`` preserves Stockfish's
+        MultiPV rank and is recorded explicitly for deterministic tie-breaking.
+        """
+        roots = tuple(dict.fromkeys(root_moves))
+        analysis_depth = depth if depth is not None else self.depth
+        attempts = 0
+        evaluations: dict[chess.Move, tuple[float, list[chess.Move], int | None]] = {}
+        max_attempts = 2 if retry_incomplete else 1
+        while attempts < max_attempts:
+            attempts += 1
+            evaluations = self.evaluate_root_moves(board, roots, depth=analysis_depth)
+            if all(move in evaluations for move in roots):
+                break
+        ranks = {move: rank for rank, move in enumerate(evaluations)}
+        return RootEvaluationSnapshot(
+            requested_roots=roots,
+            evaluations=evaluations,
+            ranks=ranks,
+            depth=analysis_depth,
+            attempts=attempts,
+        )
+
     def analyse_candidates(
         self,
         board: chess.Board,
@@ -540,11 +574,12 @@ class StockfishClient:
         good_moves_with_eval = {}
         for move_obj, (ev, _pv, _mate) in sorted_moves:
             drop = best_eval - ev
-            if drop <= acceptable_drop:
+            if drop < acceptable_drop:
                 san = board.san(move_obj)
                 good_moves_san.append(san)
                 # Eval diff from best, in side-to-move perspective
-                good_moves_with_eval[san] = round(-drop, 2)
+                delta = round(-drop, 2)
+                good_moves_with_eval[san] = 0.0 if delta == 0 else delta
 
         return {
             "eval": round(white_eval, 2),

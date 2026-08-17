@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import type { AnalysisScope } from "../types";
 import type { StudySide } from "../types/mistakes";
 import { MistakeCapturePanel } from "./mistakes/MistakeCapturePanel";
 
@@ -7,6 +8,7 @@ interface AnalysisMistakeDialogProps {
   open: boolean;
   analysisRunId: string;
   studySide: StudySide;
+  analysisScope?: AnalysisScope;
   players?: { white?: string; black?: string };
   onStudySideChange: (side: StudySide) => void;
   onJumpToMove: (ply: number) => void;
@@ -18,6 +20,7 @@ export function AnalysisMistakeDialog({
   open,
   analysisRunId,
   studySide,
+  analysisScope = "both",
   players,
   onStudySideChange,
   onJumpToMove,
@@ -89,6 +92,7 @@ export function AnalysisMistakeDialog({
           <MistakeCapturePanel
             analysisRunId={analysisRunId}
             studySide={studySide}
+            analysisScope={analysisScope}
             players={players}
             onStudySideChange={onStudySideChange}
             onJumpToMove={onJumpToMove}

@@ -24,8 +24,62 @@ PROBE_DEPTH = 8
 MIN_ANALYSIS_DEPTH = 10
 
 # CTI evaluates the smallest Maia-probability prefix that reaches this target.
-# Any unevaluated tail becomes an explicit uncertainty interval.
-CTI_POLICY_COVERAGE = 0.995
+# Any unevaluated tail becomes an explicit uncertainty interval of at most 1%.
+CTI_POLICY_COVERAGE = 0.99
+
+ROOT_COMPARISON_METHOD = "coherent_restricted_multipv_v1"
+
+
+@dataclass(frozen=True)
+class TimelineEvaluation:
+    """One unrestricted single-PV result used only for the game timeline.
+
+    Scores and mate distances use the current side-to-move perspective. The
+    root may be reused as a CTI discovery candidate, but the numeric evidence
+    is never comparable with a coherent restricted-root snapshot.
+    """
+
+    move: chess.Move
+    evaluation: float
+    pv: tuple[chess.Move, ...]
+    mate: int | None
+    depth: int
+
+
+@dataclass
+class RootEvaluationSnapshot:
+    """One ranked, internally comparable restricted-root Stockfish result."""
+
+    requested_roots: tuple[chess.Move, ...]
+    evaluations: dict[chess.Move, tuple[float, list[chess.Move], int | None]]
+    ranks: dict[chess.Move, int]
+    depth: int
+    attempts: int = 1
+
+    @property
+    def missing_roots(self) -> tuple[chess.Move, ...]:
+        return tuple(move for move in self.requested_roots if move not in self.evaluations)
+
+    @property
+    def complete(self) -> bool:
+        return not self.missing_roots
+
+    def authoritative(
+        self,
+    ) -> tuple[chess.Move, float, list[chess.Move], int | None] | None:
+        """Return the highest-ranked complete-snapshot root deterministically."""
+        if not self.complete or not self.evaluations:
+            return None
+        best_move = min(
+            self.evaluations,
+            key=lambda move: (
+                -self.evaluations[move][0],
+                self.ranks.get(move, len(self.evaluations)),
+                move.uci(),
+            ),
+        )
+        evaluation, pv, mate = self.evaluations[best_move]
+        return best_move, evaluation, list(pv), mate
 
 
 @dataclass
@@ -41,6 +95,7 @@ class CTIResult:
             High values mean humans are unlikely to find a good move.
         good_moves: Evaluated moves in set S (within acceptable_drop of best
             eval). This list is not necessarily exhaustive while CTI is approximate.
+        best_move: Authoritative root selected from the final restricted snapshot.
         best_eval: Eval of the best move, from side-to-move perspective.
         best_mate: Mate-in-N from side-to-move perspective, or None if no forced mate.
         all_evals: Map of every evaluated move to its eval (side-to-move perspective).
@@ -48,19 +103,28 @@ class CTIResult:
         best_pv: Principal variation (sequence of moves) for the best move.
         cti_lower_bound/cti_upper_bound: Formal interval caused by unevaluated
             Maia policy mass. Equal when the result is exact.
+        played_move_eval: Played-root evaluation from the same final snapshot,
+            in side-to-move perspective.
+        comparison_depth/method/status: Provenance and availability of the
+            coherent restricted-root comparison.
     """
 
     cti: float | None
-    cti_lower_bound: float
-    cti_upper_bound: float
+    cti_lower_bound: float | None
+    cti_upper_bound: float | None
     cti_remaining_mass: float
     cti_is_approximate: bool
     good_moves: list[chess.Move]
-    best_eval: float
+    best_move: chess.Move | None
+    best_eval: float | None
     best_mate: int | None
     all_evals: dict[chess.Move, float]
     maia_policy: dict[chess.Move, float]
     best_pv: list[chess.Move]
+    played_move_eval: float | None
+    comparison_depth: int | None
+    comparison_method: str | None
+    comparison_status: str
 
 
 @dataclass
@@ -75,8 +139,8 @@ class AnalysisMoveData:
         side: ``"white"`` or ``"black"`` -- who is to move in this position.
         move: The move actually played, in SAN notation (e.g., ``"Nf3"``).
         fen: FEN of the position BEFORE the move is played.
-        stockfish_eval: Pre-move eval (best eval from multi-PV search of this
-            position). Normalized to White's perspective.
+        stockfish_eval: Independent pre-move single-PV timeline evaluation,
+            normalized to White's perspective.
         eval_after: Post-move eval (eval of the position AFTER this move).
             Populated in a post-processing pass as stockfish_eval[i+1].
             Normalized to White's perspective. This is the value the UI displays.
@@ -86,6 +150,13 @@ class AnalysisMoveData:
             in SAN. May omit low-probability roots when CTI is approximate.
         good_moves_with_eval: Map of good moves (SAN) to their eval drop from best
             (negative or zero values; 0.0 = the best move itself).
+        played_move_eval_drop: Unrounded best-minus-played loss in pawns.
+        matched_best_eval/matched_played_eval: Root evaluations from the same
+            final comparison snapshot, both in side-to-move perspective.
+        comparison_depth/method/status: Provenance and availability of that
+            coherent root comparison.
+        cti_skip_reason: Explicit reason CTI was intentionally omitted for the
+            standard initial position or an unselected side.
         is_minefield: True if CTI exceeds the minefield_threshold.
         mbi_classification: MBI category for this move if it was a blunder:
             ``"cognitive_trap"``, ``"random_oversight"``,
@@ -136,6 +207,12 @@ class AnalysisMoveData:
     best_line_evals: dict[str, dict]
     mate_in: int | None
     played_move_eval_drop: float | None = None
+    matched_best_eval: float | None = None
+    matched_played_eval: float | None = None
+    comparison_depth: int | None = None
+    comparison_method: str | None = None
+    comparison_status: str = "not_applicable"
+    cti_skip_reason: str | None = None
 
 
 @dataclass

@@ -28,6 +28,7 @@ const CHART = {
   evalBg: "var(--chart-eval-bg)",
   evalPositive: "var(--chart-eval-positive)",
   evalNegative: "var(--chart-eval-negative)",
+  evalLine: "var(--chart-eval-line)",
   zero: "var(--chart-zero)",
   selected: "var(--chart-selected)",
   ctiWhite: "var(--chart-cti-white)",
@@ -150,6 +151,7 @@ export function AnalysisChart({
               type="linear"
               dataKey="evalPositive"
               fill={CHART.evalPositive}
+              fillOpacity={1}
               stroke="none"
               baseValue={0}
               isAnimationActive={false}
@@ -159,6 +161,7 @@ export function AnalysisChart({
               type="linear"
               dataKey="evalNegative"
               fill={CHART.evalNegative}
+              fillOpacity={1}
               stroke="none"
               baseValue={0}
               isAnimationActive={false}
@@ -167,7 +170,7 @@ export function AnalysisChart({
               yAxisId="eval"
               type="linear"
               dataKey="stockfish_eval"
-              stroke={CHART.evalNegative}
+              stroke={CHART.evalLine}
               strokeWidth={1}
               dot={false}
               activeDot={false}

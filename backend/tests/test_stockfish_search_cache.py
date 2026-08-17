@@ -81,6 +81,21 @@ def test_restricted_search_hit_is_exact_and_defensively_cloned():
     assert second[e4][1] == [e4]
 
 
+def test_root_snapshot_uses_cached_results_without_sharing_mutable_pvs():
+    stockfish = client()
+    board = chess.Board()
+    e4 = chess.Move.from_uci("e2e4")
+    d4 = chess.Move.from_uci("d2d4")
+
+    first = stockfish.evaluate_root_snapshot(board, [e4, d4], depth=14)
+    first.evaluations[e4][1].clear()
+    second = stockfish.evaluate_root_snapshot(board, [e4, d4], depth=14)
+
+    assert len(stockfish.engine.calls) == 1
+    assert second.evaluations[e4][1] == [e4]
+    assert second.complete
+
+
 def test_history_depth_root_order_and_engine_options_are_cache_misses():
     stockfish = client()
     e4 = chess.Move.from_uci("e2e4")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -33,6 +34,11 @@ def run_payload() -> dict:
         "cti_upper_bound": 0.91,
         "cti_is_approximate": True,
         "played_move_eval_drop": 0.8,
+        "matched_best_eval": 0.4,
+        "matched_played_eval": -0.4,
+        "comparison_depth": 12,
+        "comparison_method": "coherent_restricted_multipv_v1",
+        "comparison_status": "complete",
         "mbi_classification": None,
         "mbi_maia_prob": None,
         "side": "white",
@@ -61,6 +67,7 @@ def run_payload() -> dict:
         "id": "run-1",
         "headers": {"White": "Master", "Black": "Opponent", "Event": "Test"},
         "request": {
+            "analysis_scope": "both",
             "acceptable_drop": 0.5,
             "minefield_threshold": 0.8,
             "blunder_threshold": 1.0,
@@ -132,6 +139,18 @@ def test_selector_uses_union_lower_bound_and_side_isolation():
     assert suggestions[1]["system_reasons"] == ["human_natural_blunder"]
     assert suggestions[2]["system_reasons"] == ["high_cti_mistake", "human_natural_blunder"]
     assert suggestions[0]["evidence"]["maia3_white_elo"] == 2400
+    assert suggestions[0]["evidence"]["matched_best_eval"] == 0.4
+    assert suggestions[0]["evidence"]["matched_played_eval"] == -0.4
+    assert suggestions[0]["evidence"]["comparison_status"] == "complete"
+
+
+def test_selector_rejects_a_side_omitted_by_analysis_scope():
+    payload = run_payload()
+    payload["request"]["analysis_scope"] = "white"
+
+    assert derive_mistake_suggestions(payload, "white")
+    with pytest.raises(ValueError, match="Black was not analyzed"):
+        derive_mistake_suggestions(payload, "black")
 
 
 def test_repository_save_tags_attempt_lifecycle_and_full_game_preservation(tmp_path):

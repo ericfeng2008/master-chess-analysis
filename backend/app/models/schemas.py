@@ -39,7 +39,8 @@ class GameMetadataPatch(BaseModel):
 class AnalyzeRequest(BaseModel):
     pgn: str
     game_id: str | None = None
-    acceptable_drop: float = Field(default=0.5, ge=0.0)
+    analysis_scope: Literal["both", "white", "black"] = "both"
+    acceptable_drop: float = Field(default=0.3, ge=0.2, le=0.4)
     minefield_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
     engine_depth: int = Field(default=18, ge=12, le=28)
     blunder_threshold: float = Field(default=1.0, ge=0.5, le=3.0)
@@ -63,12 +64,25 @@ class AnalysisMoveResult(BaseModel):
     cti_upper_bound: float | None = None
     cti_remaining_mass: float | None = None
     cti_is_approximate: bool = False
+    best_move: str | None = None
     good_moves: list[str]
     good_moves_with_eval: dict[str, float]
     is_minefield: bool
     mbi_classification: str | None = None
     mbi_maia_prob: float | None = None
-    played_move_eval_drop: float | None = None
+    played_move_eval_drop: float | None = Field(
+        default=None, description="Unrounded best-minus-played loss in pawns"
+    )
+    matched_best_eval: float | None = Field(
+        default=None, description="Best-root score in side-to-move perspective"
+    )
+    matched_played_eval: float | None = Field(
+        default=None, description="Played-root score in side-to-move perspective"
+    )
+    comparison_depth: int | None = None
+    comparison_method: str | None = None
+    comparison_status: Literal["complete", "unavailable", "not_applicable"] = "not_applicable"
+    cti_skip_reason: Literal["initial_position", "side_not_selected"] | None = None
     eig_value: float | None = None
     is_eig_flagged: bool = False
     is_brilliant: bool = False
@@ -125,7 +139,7 @@ class EvaluatePositionRequest(BaseModel):
     fen: str
     # Depth 10 remains supported for the internal lazy variation-detail path.
     depth: int = Field(default=18, ge=10, le=28)
-    acceptable_drop: float = Field(default=0.5, ge=0.0)
+    acceptable_drop: float = Field(default=0.3, ge=0.0)
     purpose: Literal["exploration", "variation_detail"] = "exploration"
 
 

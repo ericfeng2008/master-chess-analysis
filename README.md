@@ -5,7 +5,7 @@ Master Chess Game Analyzer is a local chess-analysis and training application. I
 It combines:
 
 - **Stockfish**, a strong open-source chess engine, for objective position evaluation. Stockfish searches for the best continuations, scores positions in pawn-equivalent evaluations, and identifies which candidate moves preserve or lose objective value.
-- **Maia3-79M**, a history-aware neural-network model for predicting human chess moves. Maia3 considers the current position, recent position history, and separate player/opponent Elo ratings to estimate the probability of every legal move. It lets the analyzer distinguish positions that are objectively difficult from moves that merely look unusual to the engine. Learn more in the [Maia3 GitHub repository](https://github.com/CSSLab/maia3) and the [Maia3 Hugging Face collection](https://huggingface.co/collections/MaiaChess/maia3).
+- **Maia3**, a history-aware neural-network model for predicting human chess moves. Maia3 considers the current position, recent position history, and separate player/opponent Elo ratings to estimate the probability of every legal move. It lets the analyzer distinguish positions that are objectively difficult from moves that merely look unusual to the engine. Learn more in the [Maia3 GitHub repository](https://github.com/CSSLab/maia3) and the [Maia3 Hugging Face collection](https://huggingface.co/collections/MaiaChess/maia3).
 
 Analysis runs locally on your machine: no account, cloud synchronization, or game data sent externally.
 
@@ -28,7 +28,11 @@ After analysis, you explicitly select which suggested mistakes to save. The sele
 | **EIG** (Engine-Intuition Gap) | Divergence between engine and human preference |
 | **BRI** (Brilliancy) | Objectively strong moves that humans rarely find |
 
-For a complete explanation of these metrics, configuration guidance, and the review/practice workflow, see the [User Guide](./UserGuide.md).
+The completed analysis view brings the chessboard, move notation, evaluation chart, and position metrics together for game review.
+
+<img src="./images/CompletedAnalysis.png" alt="Completed game analysis showing the chessboard, move notation, evaluation chart, and position metrics" width="1200" />
+
+Follow the full [User Guide](./UserGuide.md) for step-by-step instructions on analyzing games, understanding these metrics, saving and tagging mistakes, and practicing saved positions.
 
 ## Analysis Time and Performance
 
@@ -62,17 +66,6 @@ pip3 install pipenv
 # Stockfish
 sudo apt-get install -y stockfish
 ```
-
-### Windows (Ubuntu WSL only)
-
-Native Windows setup is not supported. If you already have Ubuntu in Windows Subsystem for Linux (WSL), open an Ubuntu WSL terminal and follow the **Linux (Ubuntu/Debian)** commands above. Stockfish is required; install it in Ubuntu WSL before starting the application:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y stockfish
-```
-
-Clone the project into the WSL Linux filesystem—such as a directory under `~/`—rather than a Windows-mounted path such as `/mnt/c/`; this avoids avoidable filesystem overhead. Once both services are running in WSL, open `http://localhost:5173` in your Windows browser.
 
 ## Setup
 
@@ -129,7 +122,7 @@ If your engines are installed in non-default locations, or you want to tune engi
 | Variable | Default | Description |
 |---|---|---|
 | `ANALYSIS_STOCKFISH_PATH` | `/opt/homebrew/bin/stockfish` | Path to Stockfish binary |
-| `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `18` | Backend fallback Stockfish search depth (12-28; higher = more accurate but slower) |
+| `ANALYSIS_DEFAULT_ENGINE_DEPTH` | `18` | Backend fallback Stockfish search depth (16-28; higher = more accurate but slower, and need more powerful CPU) |
 | `ANALYSIS_STOCKFISH_THREADS` | `0` (auto) | CPU threads for Stockfish (`0` = auto-detect: `cpu_count - 1`) |
 | `ANALYSIS_STOCKFISH_HASH_MB` | `256` | Stockfish hash table size in MB (more = better for deep analysis) |
 | `ANALYSIS_STOCKFISH_SEARCH_CACHE_ENTRIES` | `2048` | Maximum exact process-local Stockfish best/root search results retained in the LRU cache (`0` disables it) |

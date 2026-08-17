@@ -22,7 +22,7 @@ interface HarnessGameState {
   cancelAnalysis: () => void;
   clearAnalysis: () => void;
   selectMove: (index: number) => void;
-  restoreAnalysis: () => void;
+  restoreAnalysis: (game: StoredGame, selectedPly?: number) => void;
 }
 
 interface HarnessExplorationState {
@@ -385,6 +385,43 @@ describe("AnalyzerPage evaluation bar integration", () => {
     expect(screen.queryByRole("dialog", { name: "Save Mistakes" })).not.toBeInTheDocument();
   });
 
+  it("keeps the complete history dropdown after restoring an older analysis run", async () => {
+    const history = [
+      analysisHistoryEntry("run-2", "2026-07-20T12:00:00Z"),
+      analysisHistoryEntry("run-1", "2026-07-19T12:00:00Z"),
+    ];
+    const selectedRun = storedAnalysis(2600, 2600);
+    const selectedLogicalGame = logicalGame(selectedRun);
+    selectedLogicalGame.analysis_history = history;
+    harness.game = makeGameState({
+      ...makeResult(),
+      game_id: "game-1",
+      analysis_run_id: "run-2",
+      analysis_history: history,
+    });
+    harness.game.restoreAnalysis = vi.fn((game: StoredGame) => {
+      harness.game.result = {
+        ...game.result,
+        game_id: game.game_id,
+        analysis_run_id: game.id,
+        cache_hit: true,
+      };
+    });
+    pageApi.getLogicalGame.mockResolvedValue(selectedLogicalGame);
+    render(<AnalyzerPage />);
+
+    const select = screen.getByRole("combobox", { name: "Analysis history" });
+    expect(select.querySelectorAll("option")).toHaveLength(2);
+    fireEvent.change(select, { target: { value: "run-1" } });
+
+    await waitFor(() => expect(pageApi.getLogicalGame).toHaveBeenCalledWith("game-1", "run-1"));
+    await waitFor(() => {
+      const restoredSelect = screen.getByRole("combobox", { name: "Analysis history" });
+      expect(restoredSelect).toHaveValue("run-1");
+      expect(restoredSelect.querySelectorAll("option")).toHaveLength(2);
+    });
+  });
+
   it("updates with mainline resulting-position evaluations and reorders segments on board flip", () => {
     harness.game = makeGameState(makeResult());
     const { rerender } = render(<AnalyzerPage />);
@@ -621,12 +658,15 @@ function makeResult(): AnalyzeResult {
   };
 }
 
-function analysisHistoryEntry(): AnalysisHistoryEntry {
+function analysisHistoryEntry(
+  id = "run-1",
+  createdAt = "2026-07-19T12:00:00Z",
+): AnalysisHistoryEntry {
   return {
-    id: "run-1",
+    id,
     game_id: "game-1",
-    analysis_fingerprint: "analysis-1",
-    created_at: "2026-07-19T12:00:00Z",
+    analysis_fingerprint: `analysis-${id}`,
+    created_at: createdAt,
     engine_depth: 18,
     request: storedAnalysis(2600, 2600).request,
     engine: { name: "Stockfish" },

@@ -171,14 +171,37 @@ def test_analysis_fingerprint_ignores_incidental_fields_but_covers_inputs():
     assert base != analysis_fingerprint(digest, request, engine, maia, metric_schema_version=99)
 
 
-def test_metric_schema_three_invalidates_pre_optimization_workload():
+def test_analysis_fingerprint_defaults_scope_and_separates_scope_modes():
     digest = game_fingerprint(parse_single_game_pgn(PGN_A))
     request = {"engine_depth": 18}
     engine = {"name": "Stockfish"}
     maia = {"model": "maia3-79m"}
-    assert METRIC_SCHEMA_VERSION == 3
+    both = analysis_fingerprint(digest, request, engine, maia)
+
+    assert both == analysis_fingerprint(
+        digest, {**request, "analysis_scope": "both"}, engine, maia
+    )
+    assert len(
+        {
+            both,
+            analysis_fingerprint(
+                digest, {**request, "analysis_scope": "white"}, engine, maia
+            ),
+            analysis_fingerprint(
+                digest, {**request, "analysis_scope": "black"}, engine, maia
+            ),
+        }
+    ) == 3
+
+
+def test_metric_schema_five_invalidates_previous_timeline_workload():
+    digest = game_fingerprint(parse_single_game_pgn(PGN_A))
+    request = {"engine_depth": 18}
+    engine = {"name": "Stockfish"}
+    maia = {"model": "maia3-79m"}
+    assert METRIC_SCHEMA_VERSION == 5
     assert analysis_fingerprint(digest, request, engine, maia) != analysis_fingerprint(
-        digest, request, engine, maia, metric_schema_version=2
+        digest, request, engine, maia, metric_schema_version=4
     )
 
 

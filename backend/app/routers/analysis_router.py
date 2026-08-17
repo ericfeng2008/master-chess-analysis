@@ -322,6 +322,7 @@ async def analyze(request: AnalyzeRequest, req: Request):
                 bri_threshold=request.bri_threshold,
                 maia3_white_elo=request.maia3_white_elo,
                 maia3_black_elo=request.maia3_black_elo,
+                analysis_scope=request.analysis_scope,
                 initial_moves=initial_moves,
                 initial_minefields=initial_minefields,
                 start_index=len(initial_moves),

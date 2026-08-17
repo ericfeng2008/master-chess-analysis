@@ -127,7 +127,7 @@ export function useExploration() {
       preFen: string,
       fenAfter: string,
       depth: number = 18,
-      acceptableDrop: number = 0.5,
+      acceptableDrop: number = 0.3,
     ) => {
       const seq = ++evalSeqRef.current;
       const box = { idx: -1 };
